@@ -10,11 +10,11 @@ class CompanyNavDrawer extends StatelessWidget {
         child: ListView(
           padding: EdgeInsets.zero,
           children: <Widget>[
-            // Drawer Header with gradient and logo
+            // Drawer Header with white gradient and logo
             DrawerHeader(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [Colors.black, Colors.grey],
+                  colors: [Colors.white, Colors.grey.shade200], // White gradient
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
@@ -38,7 +38,7 @@ class CompanyNavDrawer extends StatelessWidget {
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.3),
+                          color: Colors.black.withOpacity(0.1),
                           spreadRadius: 2,
                           blurRadius: 6,
                           offset: Offset(0, 3),
@@ -52,7 +52,7 @@ class CompanyNavDrawer extends StatelessWidget {
                     'ZING',
                     style: TextStyle(
                       fontSize: 24,
-                      color: Colors.white,
+                      color: Colors.black, // Black text for contrast
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1.5,
                     ),
@@ -66,20 +66,9 @@ class CompanyNavDrawer extends StatelessWidget {
               delay: 300,
               icon: Icons.phone,
               title: 'Phone: +94 76 673 789',
-            ),
-            _buildAnimatedListTile(
-              delay: 400,
-              icon: Icons.email,
-              title: 'Email: shahil@zingmarketingmastery.com',
+              onTap: () => _launchURL('tel:+94766673789'),
             ),
 
-            // Website link
-            _buildAnimatedListTile(
-              delay: 500,
-              icon: Icons.language,
-              title: 'Website',
-              onTap: () => _launchURL('https://zingmarketingmastery.com/'),
-            ),
 
             // TikTok link
             _buildAnimatedListTile(
@@ -89,15 +78,7 @@ class CompanyNavDrawer extends StatelessWidget {
               onTap: () => _launchURL('https://www.tiktok.com/@zing.official_?_t=8qi5IDOzsPg&_r=1'),
             ),
 
-            // Instagram link
-            _buildAnimatedListTile(
-              delay: 700,
-              icon: Icons.camera_alt,
-              title: 'Instagram: @company',
-              onTap: () => _launchURL('https://www.instagram.com/zing_official.lk?igsh=ZnVxMXBnYnp1d2dy&utm_source=qr'),
-            ),
-
-            Divider(),
+            Divider(color: Colors.grey.shade300), // Light gray divider
 
             // About Us with a clear CTA
             _buildAnimatedListTile(
@@ -124,8 +105,8 @@ class CompanyNavDrawer extends StatelessWidget {
       delay: Duration(milliseconds: delay),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: Colors.black,
-          child: Icon(icon, color: Colors.white),
+          backgroundColor: Colors.grey.shade300, // Light gray circle
+          child: Icon(icon, color: Colors.black), // Black icon for contrast
         ),
         title: Text(
           title,
@@ -133,10 +114,11 @@ class CompanyNavDrawer extends StatelessWidget {
             fontSize: 16,
             fontWeight: FontWeight.w600,
             letterSpacing: 0.5,
+            color: Colors.black, // Black text for contrast
           ),
         ),
         onTap: onTap,
-        tileColor: Colors.transparent, // Make the background transparent for a cleaner look
+        tileColor: Colors.transparent, // Transparent background
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
         ),

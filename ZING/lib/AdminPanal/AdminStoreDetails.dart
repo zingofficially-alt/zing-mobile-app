@@ -17,158 +17,385 @@ class AdminStoreDetailScreen extends StatefulWidget {
   State<AdminStoreDetailScreen> createState() => _AdminStoreDetailScreenState();
 }
 
-class _AdminStoreDetailScreenState extends State<AdminStoreDetailScreen> {
-  late List<YoutubePlayerController> _youtubeControllers;
+class _AdminStoreDetailScreenState extends State<AdminStoreDetailScreen> with TickerProviderStateMixin {
+  List<YoutubePlayerController> _youtubeControllers = [];
   Store? _store;
   bool _isLoadingVideos = true;
+  bool _isAddingVideo = false; // Add loading state for video operations
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+
+  // Tab controller for organizing content
+  late TabController _tabController;
+
+  // Scroll controller for custom scrolling effects
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
     _fetchStoreData();
-    Provider.of<OrderProvider>(context, listen: false)
-        .fetchOrdersByStore(context,widget.store.id!);
+
+    // Defer fetchOrdersByStore until after the first frame to avoid setState during build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<OrderProvider>(context, listen: false)
+          .fetchOrdersByStore(context, widget.store.id!);
+    });
+
+    // Initialize animation controller
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+        CurvedAnimation(parent: _animationController, curve: Curves.easeIn)
+    );
+
+    _animationController.forward();
+
+    // Initialize tab controller
+    _tabController = TabController(length: 5, vsync: this);
   }
 
   Future<void> _fetchStoreData() async {
     final storeProvider = Provider.of<StoreProvider>(context, listen: false);
     Store? fetchedStore = await storeProvider.fetchStore(widget.store.id!);
 
-    if (fetchedStore != null && fetchedStore.videos != null) {
+    if (fetchedStore != null && mounted) {
       setState(() {
         _store = fetchedStore;
-        _youtubeControllers = _store!.videos!.map((video) {
-          final videoId = YoutubePlayer.convertUrlToId(video.url);
-          return YoutubePlayerController(
-            initialVideoId: videoId ?? '',
-            flags: const YoutubePlayerFlags(autoPlay: false),
-          );
-        }).toList();
+        _initializeVideoControllers();
         _isLoadingVideos = false;
       });
     }
   }
 
-  @override
-  void dispose() {
+  void _initializeVideoControllers() {
+    // Dispose existing controllers
     for (var controller in _youtubeControllers) {
       controller.dispose();
     }
+
+    // Initialize new controllers
+    _youtubeControllers = _store?.videos?.map((video) {
+      final videoId = YoutubePlayer.convertUrlToId(video.url);
+      return YoutubePlayerController(
+        initialVideoId: videoId ?? '',
+        flags: const YoutubePlayerFlags(autoPlay: false),
+      );
+    }).toList() ?? [];
+  }
+
+  @override
+  void dispose() {
+    if (_youtubeControllers.isNotEmpty) {
+      for (var controller in _youtubeControllers) {
+        controller.dispose();
+      }
+    }
+    _animationController.dispose();
+    _tabController.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  // Validate YouTube URL
+  bool _isValidYouTubeUrl(String url) {
+    final videoId = YoutubePlayer.convertUrlToId(url);
+    return videoId != null && videoId.isNotEmpty;
+  }
+
+  // Show success message
+  void _showSuccessSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.white),
+            const SizedBox(width: 8),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
+  // Show error message
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.error_outline, color: Colors.white),
+            const SizedBox(width: 8),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: _buildAppBar(),
-      body: Stack(
-        children: [
-          _buildBackgroundGradient(), // Gradient background
-          _store != null ? _buildStoreDetails() : _buildLoading(),
-        ],
+    return Theme(
+      data: Theme.of(context).copyWith(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.indigo,
+          primary: Colors.indigo,
+          secondary: Colors.teal,
+          surface: Colors.white,
+          background: Colors.grey[50]!,
+        ),
+        cardTheme: CardThemeData(
+          elevation: 4,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shadowColor: Colors.black26,
+        ),
+        appBarTheme: AppBarTheme(
+          backgroundColor: Colors.indigo,
+          elevation: 0,
+        ),
       ),
-      floatingActionButton: _buildFloatingActionButton(),
-      // Bottom nav bar
+      child: Scaffold(
+        backgroundColor: Colors.grey[50],
+        body: NestedScrollView(
+          controller: _scrollController,
+          headerSliverBuilder: (context, innerBoxIsScrolled) {
+            return [_buildAppBar()];
+          },
+          body: _store != null ? _buildStoreDetails() : _buildLoading(),
+        ),
+        floatingActionButton: _buildFloatingActionButton(),
+      ),
     );
   }
 
-  AppBar _buildAppBar() {
-    return AppBar(
+  SliverAppBar _buildAppBar() {
+    return SliverAppBar(
+      expandedHeight: 200.0,
+      floating: false,
+      pinned: true,
       title: Text(
-        '${_store?.name ?? ''} Details',
+        '${_store?.name ?? 'Store'} Details',
         style: const TextStyle(
-          fontFamily: 'Georgia',
-          fontWeight: FontWeight.bold,
-          fontSize: 22,
+          fontFamily: 'Poppins',
+          fontWeight: FontWeight.w600,
+          fontSize: 20,
         ),
       ),
-      centerTitle: true,
-      flexibleSpace: ClipPath(
-        clipper: CustomAppBarClipper(),
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Colors.blue.shade600, Colors.purple.shade600],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+      flexibleSpace: FlexibleSpaceBar(
+        background: _store?.imageUrl != null
+            ? Stack(
+          fit: StackFit.expand,
+          children: [
+            // Store image as background
+            Image.network(
+              _store!.imageUrl,
+              fit: BoxFit.cover,
+            ),
+            // Gradient overlay for better text visibility
+            Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    Colors.black.withOpacity(0.7),
+                  ],
+                ),
+              ),
+            ),
+            // Store info overlay
+            Positioned(
+              bottom: 16,
+              left: 16,
+              right: 16,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _store?.name ?? '',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      fontFamily: 'Poppins',
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.teal,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      _store?.category ?? '',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        )
+            : Container(
+          color: Colors.indigo,
+          child: const Center(
+            child: Icon(
+              Icons.store,
+              color: Colors.white,
+              size: 64,
             ),
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildBackgroundGradient() {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Colors.blue.shade300, Colors.purple.shade700],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+      bottom: TabBar(
+        controller: _tabController,
+        labelColor: Colors.white,
+        unselectedLabelColor: Colors.white70,
+        indicatorColor: Colors.white,
+        indicatorWeight: 3,
+        tabs: const [
+          Tab(icon: Icon(Icons.info), text: "Info"),
+          Tab(icon: Icon(Icons.shopping_cart), text: "Orders"),
+          Tab(icon: Icon(Icons.payment), text: "Payments"),
+          Tab(icon: Icon(Icons.location_on), text: "Location"),
+          Tab(icon: Icon(Icons.video_library), text: "Videos"),
+        ],
       ),
     );
   }
 
   Widget _buildLoading() {
-    return const Center(
-      child: CircularProgressIndicator(),
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 16),
+          Text(
+            'Loading store details...',
+            style: TextStyle(
+              color: Colors.grey[600],
+              fontSize: 16,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildStoreDetails() {
-    return SingleChildScrollView(
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildInfoTab(),
+          _buildOrdersTab(),
+          _buildPaymentsTab(),
+          _buildLocationTab(),
+          _buildVideosTab(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoTab() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _buildStoreInfoCard(),
+        const SizedBox(height: 16),
+        _buildDeliveryMethodsCard(),
+      ],
+    );
+  }
+
+  Widget _buildStoreInfoCard() {
+    return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildAnimatedStoreInfoCard(),
-            const SizedBox(height: 20),
-            _buildStoreImageCard(),
-            const SizedBox(height: 20),
-            _buildOrdersCard(),
-            const SizedBox(height: 20),
-            _buildPaymentsCard(),
-            const SizedBox(height: 20),
-            _buildStoreLocationCard(),
-            const SizedBox(height: 20),
-            _buildDeliveryMethodsCard(),
-            const SizedBox(height: 20),
-            _buildYouTubePlayers(),
+            _buildSectionTitle('Store Details', Icons.store),
+            const SizedBox(height: 16),
+            _buildDetailItem('Name', _store?.name ?? '', Icons.shopping_bag),
+            const Divider(),
+            _buildDetailItem('Category', _store?.category ?? '', Icons.category),
+            // Add more details as needed
           ],
         ),
       ),
     );
   }
 
-  Widget _buildAnimatedStoreInfoCard() {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 500),
-      curve: Curves.easeInOut,
-      margin: const EdgeInsets.symmetric(vertical: 10),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(15),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.blue.shade100,
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+  Widget _buildDetailItem(String label, String value, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.indigo.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: Colors.indigo, size: 20),
+          ),
+          const SizedBox(width: 16),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  color: Colors.grey[600],
+                  fontSize: 14,
+                ),
+              ),
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildOrdersTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
       child: Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15.0)),
-        elevation: 8,
         child: Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildSectionTitle('Store Information'),
-              const SizedBox(height: 10),
-              _buildInfoRow('Name', _store?.name ?? ''),
-              _buildInfoRow('Category', _store?.category ?? ''),
+              _buildSectionTitle('Orders', Icons.shopping_cart),
+              const SizedBox(height: 16),
+              Expanded(
+                child: _buildOrdersSection(),
+              ),
             ],
           ),
         ),
@@ -176,188 +403,148 @@ class _AdminStoreDetailScreenState extends State<AdminStoreDetailScreen> {
     );
   }
 
-  Widget _buildInfoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text('$label:', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          Text(value, style: const TextStyle(fontSize: 16)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStoreImageCard() {
-    return Card(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20.0),
-      ),
-      elevation: 10,
-      shadowColor: Colors.black.withOpacity(0.2), // Adding shadow effect for depth
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildSectionTitle('Store Image'),
-
-          // Image with subtle animation effect on tap
-          GestureDetector(
-            onTap: () {
-              // Implement light effect or any other interaction on tap
-            },
-            child: ClipRRect(
-              borderRadius: const BorderRadius.vertical(
-                bottom: Radius.circular(20),
-                top: Radius.circular(20),
-              ),
-              child: _buildImageWithEffects(), // Improved image display
-            ),
-          ),
-
-          const SizedBox(height: 8),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildImageWithEffects() {
-    return Container(
-      height: 220,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        gradient: const LinearGradient(
-          colors: [
-            Colors.transparent,
-            Colors.black26, // Adding a subtle gradient for contrast
-          ],
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-        ),
-      ),
-      child: _store?.imageUrl != null && _store!.imageUrl.isNotEmpty
-          ? Image.network(
-        _store!.imageUrl,
-        height: 220,
-        fit: BoxFit.cover,
-        loadingBuilder: (context, child, loadingProgress) {
-          if (loadingProgress == null) return child;
-          return Center(
-            child: CircularProgressIndicator(
-              value: loadingProgress.expectedTotalBytes != null
-                  ? loadingProgress.cumulativeBytesLoaded /
-                  loadingProgress.expectedTotalBytes!
-                  : null,
-            ),
-          );
-        },
-        errorBuilder: (context, error, stackTrace) {
-          return const Center(
-            child: Icon(
-              Icons.broken_image,
-              size: 50,
-              color: Colors.redAccent,
-            ),
-          );
-        },
-      )
-          : const Center(
-        child: Icon(
-          Icons.image_not_supported,
-          size: 50,
-          color: Colors.grey,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOrdersCard() {
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15.0)),
-      elevation: 8,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildSectionTitle('Orders'),
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: _buildOrdersSection(),
-          ),
-        ],
-      ),
-    );
-  }
-
-
   Widget _buildOrdersSection() {
     return Consumer<OrderProvider>(
       builder: (context, orderProvider, child) {
         if (orderProvider.isLoading) {
-          return Center(
+          return const Center(
             child: CircularProgressIndicator(),
           );
         } else if (orderProvider.orders.isEmpty) {
           return Center(
-            child: Text(
-              'No orders available.',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: Colors.grey[600]),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.shopping_cart_outlined, size: 64, color: Colors.grey[400]),
+                const SizedBox(height: 16),
+                Text(
+                  'No orders available',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: Colors.grey[600]),
+                ),
+              ],
             ),
           );
         } else {
-          return ListView.builder(
+          return ListView.separated(
             itemCount: orderProvider.orders.length,
+            separatorBuilder: (context, index) => const Divider(),
             shrinkWrap: true,
-            physics: BouncingScrollPhysics(),
+            physics: const BouncingScrollPhysics(),
             itemBuilder: (context, index) {
               final order = orderProvider.orders[index];
-
-              return Card(
-                margin: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
-                elevation: 4,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(8.0),
-                    decoration: BoxDecoration(
-                      color: Colors.blue[50],
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.shopping_cart, color: Colors.blue, size: 24),
-                  ),
-                  title: Text(
-                    'Order #${order.id}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Total Price: \$${order.totalPrice.toStringAsFixed(2)}',
-                        style: const TextStyle(fontSize: 14, color: Colors.green),
-                      ),
-                      Text(
-                        'Status: ${order.status}',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: _getStatusColor(order.status),
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                  trailing: Icon(Icons.arrow_forward_ios, size: 18, color: Colors.grey[600]),
-                  onTap: () {
-                    // Navigate to order details or add functionality
-                  },
-                ),
-              );
+              return _buildOrderCard(order);
             },
           );
         }
       },
     );
+  }
+
+  Widget _buildOrderCard(dynamic order) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () {
+          // Navigate to order details
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          child: Row(
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: _getStatusColorLight(order.status),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Center(
+                  child: Icon(
+                    _getStatusIcon(order.status),
+                    color: _getStatusColor(order.status),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Order #${order.id}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Total: \$${order.totalPrice.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Colors.green,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: _getStatusColorLight(order.status),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  order.status,
+                  style: TextStyle(
+                    color: _getStatusColor(order.status),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                Icons.chevron_right,
+                color: Colors.grey[400],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Color _getStatusColorLight(String status) {
+    switch (status) {
+      case 'Pending':
+        return Colors.orange.withOpacity(0.2);
+      case 'Processed':
+        return Colors.blue.withOpacity(0.2);
+      case 'Shipped':
+        return Colors.purple.withOpacity(0.2);
+      case 'Delivered':
+        return Colors.green.withOpacity(0.2);
+      default:
+        return Colors.grey.withOpacity(0.2);
+    }
+  }
+
+  IconData _getStatusIcon(String status) {
+    switch (status) {
+      case 'Pending':
+        return Icons.access_time;
+      case 'Processed':
+        return Icons.inventory;
+      case 'Shipped':
+        return Icons.local_shipping;
+      case 'Delivered':
+        return Icons.check_circle;
+      default:
+        return Icons.info;
+    }
   }
 
   Color _getStatusColor(String status) {
@@ -375,19 +562,23 @@ class _AdminStoreDetailScreenState extends State<AdminStoreDetailScreen> {
     }
   }
 
-  Widget _buildPaymentsCard() {
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15.0)),
-      elevation: 8,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildSectionTitle('Payments to Zing'),
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: _buildPaymentsSection(widget.store.owner.id, widget.store.id!),
+  Widget _buildPaymentsTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildSectionTitle('Payments to Zing', Icons.payment),
+              const SizedBox(height: 16),
+              Expanded(
+                child: _buildPaymentsSection(widget.store.owner.id, widget.store.id!),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -395,100 +586,277 @@ class _AdminStoreDetailScreenState extends State<AdminStoreDetailScreen> {
   Widget _buildPaymentsSection(String userId, String storeId) {
     return FutureBuilder<List<Payment>>(
       future: Provider.of<StoreProvider>(context, listen: false)
-          .fetchPaymentsForStoreByOwner(userId, storeId), // Fetch payments for the owner by store ID
+          .fetchPaymentsForStoreByOwner(userId, storeId),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         } else if (snapshot.hasError) {
-          return Text('Error: ${snapshot.error}');
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
+                const SizedBox(height: 16),
+                Text(
+                  'Error: ${snapshot.error}',
+                  style: TextStyle(color: Colors.red[700]),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          );
         } else if (snapshot.hasData && snapshot.data!.isNotEmpty) {
           return ListView.builder(
             itemCount: snapshot.data!.length,
             shrinkWrap: true,
             itemBuilder: (context, index) {
-              final payment = snapshot.data![index]; // Payment object
-              return Card(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15.0)),
-                elevation: 8,
-                child: ListTile(
-                  leading: const Icon(Icons.payment, color: Colors.green),
-                  title: Text('Payment ID: ${payment.paymentId}', style: TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Amount: ${payment.amount} ${payment.currency}', style: TextStyle(fontSize: 16)),
-                      Text('Date: ${payment.paymentDate.toDate()}', style: TextStyle(fontSize: 14)),
-                      Text('Status: ${payment.paymentStatus}', style: TextStyle(fontSize: 14, color: payment.paymentStatus == 'Paid' ? Colors.green : Colors.red)),
-                    ],
-                  ),
-                ),
-              );
+              final payment = snapshot.data![index];
+              return _buildPaymentCard(payment);
             },
           );
         } else {
-          return const Text('No payments available.');
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.account_balance_wallet_outlined, size: 64, color: Colors.grey[400]),
+                const SizedBox(height: 16),
+                Text(
+                  'No payments available',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          );
         }
       },
     );
   }
 
-  Widget _buildStoreLocationCard() {
+  Widget _buildPaymentCard(Payment payment) {
     return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15.0)),
-      elevation: 8,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildSectionTitle('Store Location'),
-          SizedBox(
-            height: 200,
-            child: GoogleMap(
-              initialCameraPosition: CameraPosition(
-                target: LatLng(_store?.location.latitude ?? 0, _store?.location.longitude ?? 0),
-                zoom: 14.0,
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                color: payment.paymentStatus == 'Paid'
+                    ? Colors.green.withOpacity(0.2)
+                    : Colors.red.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(12),
               ),
-              markers: {
-                Marker(
-                  markerId: MarkerId(_store?.id ?? ''),
-                  position: LatLng(_store?.location.latitude ?? 0, _store?.location.longitude ?? 0),
-                ),
-              },
+              child: Icon(
+                payment.paymentStatus == 'Paid' ? Icons.check_circle : Icons.pending,
+                color: payment.paymentStatus == 'Paid' ? Colors.green : Colors.red,
+              ),
             ),
-          ),
-        ],
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Payment ID: ${payment.paymentId}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${payment.amount} ${payment.currency}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 16,
+                      color: Colors.indigo,
+                    ),
+                  ),
+                  Text(
+                    '${payment.paymentDate.toDate()}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: payment.paymentStatus == 'Paid'
+                    ? Colors.green.withOpacity(0.2)
+                    : Colors.red.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                payment.paymentStatus,
+                style: TextStyle(
+                  color: payment.paymentStatus == 'Paid' ? Colors.green : Colors.red,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLocationTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Card(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: _buildSectionTitle('Store Location', Icons.location_on),
+            ),
+            AspectRatio(
+              aspectRatio: 16 / 9,
+              child: ClipRRect(
+                borderRadius: const BorderRadius.only(
+                  bottomLeft: Radius.circular(16),
+                  bottomRight: Radius.circular(16),
+                ),
+                child: GoogleMap(
+                  initialCameraPosition: CameraPosition(
+                    target: LatLng(_store?.location.latitude ?? 0, _store?.location.longitude ?? 0),
+                    zoom: 14.0,
+                  ),
+                  markers: {
+                    Marker(
+                      markerId: MarkerId(_store?.id ?? ''),
+                      position: LatLng(_store?.location.latitude ?? 0, _store?.location.longitude ?? 0),
+                      infoWindow: InfoWindow(title: _store?.name ?? ''),
+                    ),
+                  },
+                  myLocationEnabled: true,
+                  myLocationButtonEnabled: true,
+                  zoomControlsEnabled: true,
+                  mapToolbarEnabled: true,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Icon(Icons.directions, color: Colors.indigo),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Get Directions',
+                    style: TextStyle(
+                      color: Colors.indigo,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildDeliveryMethodsCard() {
     return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15.0)),
-      elevation: 8,
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildSectionTitle('Available Delivery Methods'),
-            const SizedBox(height: 10),
+            _buildSectionTitle('Delivery Options', Icons.local_shipping),
+            const SizedBox(height: 16),
             if (_store?.deliveryOptions != null && _store!.deliveryOptions!.isNotEmpty)
-              Column(
-                children: _store!.deliveryOptions!.map((method) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 5.0),
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _store!.deliveryOptions!.length,
+                itemBuilder: (context, index) {
+                  final method = _store!.deliveryOptions![index];
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.teal.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.teal.withOpacity(0.3)),
+                    ),
                     child: Row(
                       children: [
-                        const Icon(Icons.local_shipping, color: Colors.blueGrey),
-                        const SizedBox(width: 10),
-                        Text(method, style: const TextStyle(fontSize: 16)),
+                        Icon(
+                          _getDeliveryIcon(method),
+                          color: Colors.teal,
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          method,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
                       ],
                     ),
                   );
-                }).toList(),
+                },
               )
             else
-              const Text('No delivery methods available.'),
+              Center(
+                child: Column(
+                  children: [
+                    Icon(Icons.local_shipping_outlined, size: 64, color: Colors.grey[400]),
+                    const SizedBox(height: 16),
+                    Text(
+                      'No delivery methods available',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: Colors.grey[600]),
+                    ),
+                  ],
+                ),
+              ),
           ],
+        ),
+      ),
+    );
+  }
+
+  IconData _getDeliveryIcon(String method) {
+    if (method.toLowerCase().contains('pickup')) {
+      return Icons.store;
+    } else if (method.toLowerCase().contains('express')) {
+      return Icons.delivery_dining;
+    } else if (method.toLowerCase().contains('standard')) {
+      return Icons.local_shipping;
+    } else {
+      return Icons.local_shipping;
+    }
+  }
+
+  Widget _buildVideosTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildSectionTitle('YouTube Videos', Icons.video_library),
+              const SizedBox(height: 16),
+              Expanded(child: _buildYouTubePlayers()),
+            ],
+          ),
         ),
       ),
     );
@@ -500,142 +868,367 @@ class _AdminStoreDetailScreenState extends State<AdminStoreDetailScreen> {
     }
 
     if (_youtubeControllers.isEmpty) {
-      return const Center(child: Text('No YouTube videos available', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)));
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.video_library_outlined, size: 64, color: Colors.grey[400]),
+            const SizedBox(height: 16),
+            Text(
+              'No YouTube videos available',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _isAddingVideo ? null : _showAddVideoDialog,
+              icon: _isAddingVideo
+                  ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2)
+              )
+                  : const Icon(Icons.add),
+              label: Text(_isAddingVideo ? 'Adding...' : 'Add Video'),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(30),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
     }
 
-    return Column(
-      children: List.generate(_youtubeControllers.length, (index) {
-        return GestureDetector(
-          onTap: () {
-            setState(() {
-              // When the thumbnail is tapped, the video loads
-            });
-          },
-          child: Card(
-            margin: const EdgeInsets.symmetric(vertical: 10),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15.0)),
-            elevation: 8,
-            child: Column(
+    return GridView.builder(
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 16 / 12,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+      ),
+      itemCount: _youtubeControllers.length,
+      itemBuilder: (context, index) {
+        return _buildVideoCard(index);
+      },
+    );
+  }
+
+  Widget _buildVideoCard(int index) {
+    final videoId = YoutubePlayer.convertUrlToId(_store?.videos?[index].url ?? '');
+    final thumbnailUrl = 'https://img.youtube.com/vi/$videoId/0.jpg';
+
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Thumbnail with play button overlay
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
               children: [
-                _buildYouTubeThumbnail(index),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    TextButton.icon(
-                      icon: const Icon(Icons.edit, color: Colors.blue),
-                      label: const Text('Edit', style: TextStyle(color: Colors.blue)),
-                      onPressed: () => _showEditVideoDialog(index),
+                ClipRRect(
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(12),
+                    topRight: Radius.circular(12),
+                  ),
+                  child: Image.network(
+                    thumbnailUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        color: Colors.grey[300],
+                        child: const Center(
+                          child: Icon(Icons.error, color: Colors.red),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                // Play button overlay
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withOpacity(0.2),
+                        Colors.black.withOpacity(0.6),
+                      ],
                     ),
-                    TextButton.icon(
-                      icon: const Icon(Icons.delete, color: Colors.red),
-                      label: const Text('Delete', style: TextStyle(color: Colors.red)),
-                      onPressed: () => _deleteVideo(index),
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(12),
+                      topRight: Radius.circular(12),
                     ),
-                  ],
+                  ),
+                ),
+                Center(
+                  child: CircleAvatar(
+                    backgroundColor: Colors.red,
+                    radius: 24,
+                    child: Icon(
+                      Icons.play_arrow,
+                      color: Colors.white,
+                      size: 32,
+                    ),
+                  ),
                 ),
               ],
             ),
           ),
-        );
-      }),
+          // Action buttons
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.edit, color: Colors.blue),
+                  onPressed: () => _showEditVideoDialog(index),
+                  tooltip: 'Edit',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  onPressed: () => _deleteVideo(index),
+                  tooltip: 'Delete',
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildYouTubeThumbnail(int index) {
-    final videoId = YoutubePlayer.convertUrlToId(_store?.videos?[index].url ?? '');
-    final thumbnailUrl = 'https://img.youtube.com/vi/$videoId/0.jpg';
-
-    return Stack(
+  Widget _buildSectionTitle(String title, IconData icon) {
+    return Row(
       children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(15.0),
-          child: Image.network(thumbnailUrl, fit: BoxFit.cover),
-        ),
-        Positioned.fill(
-          child: Center(
-            child: Icon(Icons.play_circle_filled, color: Colors.white.withOpacity(0.8), size: 50),
+        Icon(icon, color: Colors.indigo),
+        const SizedBox(width: 12),
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            fontFamily: 'Poppins',
           ),
         ),
       ],
     );
   }
 
-  Widget _buildSectionTitle(String title) {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Text(
-        title,
-        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Georgia'),
-      ),
-    );
-  }
-
   Widget _buildFloatingActionButton() {
-    return FloatingActionButton(
-      onPressed: () {
-        _showAddVideoDialog();
-      },
-      child: const Icon(Icons.add, size: 30),
-      backgroundColor: Colors.purple.shade800,
-      splashColor: Colors.white,
-      elevation: 10,
-      hoverElevation: 12,
+    return FloatingActionButton.extended(
+      onPressed: _isAddingVideo ? null : _showAddVideoDialog,
+      icon: _isAddingVideo
+          ? const SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)
+      )
+          : const Icon(Icons.add),
+      label: Text(_isAddingVideo ? 'Adding...' : 'Add Video'),
+      backgroundColor: _isAddingVideo ? Colors.grey : Colors.indigo,
+      elevation: 4,
     );
   }
-
 
   void _showAddVideoDialog() {
     final videoUrlController = TextEditingController();
+    bool isValidUrl = false;
+
     showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('Add YouTube Video'),
-          content: TextField(
-            controller: videoUrlController,
-            decoration: const InputDecoration(hintText: 'Enter YouTube Video URL'),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-            TextButton(
-              onPressed: () {
-                Provider.of<StoreProvider>(context, listen: false)
-                    .addVideo(widget.store.id ?? '', videoUrlController.text);
-                Navigator.pop(context);
-              },
-              child: const Text('Add'),
-            ),
-          ],
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: [
+                  Icon(Icons.video_library, color: Colors.red),
+                  const SizedBox(width: 8),
+                  const Text('Add YouTube Video'),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: videoUrlController,
+                    onChanged: (value) {
+                      setDialogState(() {
+                        isValidUrl = _isValidYouTubeUrl(value);
+                      });
+                    },
+                    decoration: InputDecoration(
+                      hintText: 'Enter YouTube Video URL',
+                      prefixIcon: const Icon(Icons.link),
+                      suffixIcon: isValidUrl
+                          ? const Icon(Icons.check_circle, color: Colors.green)
+                          : videoUrlController.text.isNotEmpty
+                          ? const Icon(Icons.error, color: Colors.red)
+                          : null,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.indigo, width: 2),
+                      ),
+                      errorBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.red, width: 2),
+                      ),
+                    ),
+                  ),
+                  if (videoUrlController.text.isNotEmpty && !isValidUrl)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Please enter a valid YouTube URL',
+                        style: TextStyle(color: Colors.red, fontSize: 12),
+                      ),
+                    ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(
+                    'Cancel',
+                    style: TextStyle(color: Colors.grey[700]),
+                  ),
+                ),
+                ElevatedButton.icon(
+                  onPressed: isValidUrl ? () => _addVideo(videoUrlController.text) : null,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isValidUrl ? Colors.indigo : Colors.grey,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         );
       },
     );
+  }
+
+  Future<void> _addVideo(String videoUrl) async {
+    Navigator.pop(context); // Close dialog
+
+    setState(() {
+      _isAddingVideo = true;
+    });
+
+    try {
+      final storeProvider = Provider.of<StoreProvider>(context, listen: false);
+      await storeProvider.addVideo(widget.store.id ?? '', videoUrl);
+
+      // Refresh store data to get updated videos
+      await _fetchStoreData();
+
+      _showSuccessSnackBar('Video added successfully!');
+    } catch (e) {
+      _showErrorSnackBar('Failed to add video: ${e.toString()}');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isAddingVideo = false;
+        });
+      }
+    }
   }
 
   void _showEditVideoDialog(int index) {
     final videoUrlController = TextEditingController(text: _store?.videos?[index].url);
+    bool isValidUrl = _isValidYouTubeUrl(videoUrlController.text);
+
     showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('Edit YouTube Video'),
-          content: TextField(
-            controller: videoUrlController,
-            decoration: const InputDecoration(hintText: 'Edit YouTube Video URL'),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-            TextButton(
-              onPressed: () {
-                Provider.of<StoreProvider>(context, listen: false)
-                    .editVideo(widget.store.id ?? '', _store!.videos![index].id, videoUrlController.text);
-                Navigator.pop(context);
-              },
-              child: const Text('Save'),
-            ),
-          ],
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: [
+                  Icon(Icons.edit, color: Colors.blue),
+                  const SizedBox(width: 8),
+                  const Text('Edit YouTube Video'),
+                ],
+              ),
+              content: TextField(
+                controller: videoUrlController,
+                onChanged: (value) {
+                  setDialogState(() {
+                    isValidUrl = _isValidYouTubeUrl(value);
+                  });
+                },
+                decoration: InputDecoration(
+                  hintText: 'Edit YouTube Video URL',
+                  prefixIcon: const Icon(Icons.link),
+                  suffixIcon: isValidUrl
+                      ? const Icon(Icons.check_circle, color: Colors.green)
+                      : const Icon(Icons.error, color: Colors.red),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.blue, width: 2),
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(
+                    'Cancel',
+                    style: TextStyle(color: Colors.grey[700]),
+                  ),
+                ),
+                ElevatedButton.icon(
+                  onPressed: isValidUrl ? () => _editVideo(index, videoUrlController.text) : null,
+                  icon: const Icon(Icons.save),
+                  label: const Text('Save'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isValidUrl ? Colors.blue : Colors.grey,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         );
       },
     );
+  }
+
+  Future<void> _editVideo(int index, String videoUrl) async {
+    Navigator.pop(context); // Close dialog
+
+    try {
+      final storeProvider = Provider.of<StoreProvider>(context, listen: false);
+      await storeProvider.editVideo(widget.store.id ?? '', _store!.videos![index].id, videoUrl);
+
+      // Refresh store data
+      await _fetchStoreData();
+
+      _showSuccessSnackBar('Video updated successfully!');
+    } catch (e) {
+      _showErrorSnackBar('Failed to update video: ${e.toString()}');
+    }
   }
 
   void _deleteVideo(int index) {
@@ -643,26 +1236,58 @@ class _AdminStoreDetailScreenState extends State<AdminStoreDetailScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Delete Video'),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Icon(Icons.warning, color: Colors.orange),
+              const SizedBox(width: 8),
+              const Text('Delete Video'),
+            ],
+          ),
           content: const Text('Are you sure you want to delete this video?'),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
             TextButton(
-              onPressed: () {
-                Provider.of<StoreProvider>(context, listen: false)
-                    .deleteVideo(widget.store.id ?? '', _store!.videos![index]);
-                Navigator.pop(context);
-              },
-              child: const Text('Delete'),
+              onPressed: () => Navigator.pop(context),
+              child: Text(
+                'Cancel',
+                style: TextStyle(color: Colors.grey[700]),
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => _confirmDeleteVideo(index),
+              icon: const Icon(Icons.delete),
+              label: const Text('Delete'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(30),
+                ),
+              ),
             ),
           ],
         );
       },
     );
   }
+
+  Future<void> _confirmDeleteVideo(int index) async {
+    Navigator.pop(context); // Close dialog
+
+    try {
+      final storeProvider = Provider.of<StoreProvider>(context, listen: false);
+      await storeProvider.deleteVideo(widget.store.id ?? '', _store!.videos![index]);
+
+      // Refresh store data
+      await _fetchStoreData();
+
+      _showSuccessSnackBar('Video deleted successfully!');
+    } catch (e) {
+      _showErrorSnackBar('Failed to delete video: ${e.toString()}');
+    }
+  }
 }
 
-// Custom Clipper to add a curved AppBar
+// Custom Clipper for AppBar - not used in the new design but kept for reference
 class CustomAppBarClipper extends CustomClipper<Path> {
   @override
   Path getClip(Size size) {

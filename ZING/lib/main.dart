@@ -1,82 +1,91 @@
-import 'package:firebase_app_check/firebase_app_check.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // Add this import for Firebase Auth
+import 'dart:math' as math;
+import 'dart:io' show Platform;
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // Import this for orientation lock
+import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:logger/logger.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
+import 'package:zing/AdminPanal/AdminPanalDashBoard.dart';
 import 'package:zing/Service/CoustomUserProvider.dart';
 import 'package:zing/Service/SettingProvider.dart';
 import 'package:zing/Service/StoreProvider.dart';
-import 'package:zing/screen/HomeScreen.dart';
+import 'package:zing/screen/MainShell.dart';
 import 'package:zing/screen/StartingScreens/CreateAccount.dart';
 import 'package:zing/screen/StartingScreens/LoginScreen.dart';
+import 'package:zing/screen/StoreManagement/storeManagementScreen.dart';
+import 'package:zing/screen/UserScreens/FavouriteStoreScreen.dart';
 import 'dart:async';
 import 'package:zing/screen/StartingScreens/onboardingScreen.dart';
 
 import 'Cart/CartProvider.dart';
 import 'Service/AdvertisementProvider.dart';
+import 'Service/RecommendationProvider.dart';
 import 'Service/ChatProvider.dart';
+import 'Service/NotificationProvider.dart';
 import 'Service/OfferProvider.dart';
 import 'Service/OrderProvider.dart';
-import 'Service/ThameProvider.dart';
+import 'Service/ThemeProvider.dart';
 
 Future<void> requestPermissions() async {
   try {
+    debugPrint('Requesting app permissions...');
+
     Map<Permission, PermissionStatus> statuses = await [
       Permission.notification,
-      // Add any other permissions your app needs
+      Permission.locationWhenInUse,
     ].request();
 
     if (statuses[Permission.notification] == PermissionStatus.denied) {
-      // Handle denied case
       debugPrint('Notification permission denied');
     } else if (statuses[Permission.notification] == PermissionStatus.permanentlyDenied) {
-      // Guide user to app settings
-      await openAppSettings();
+      debugPrint('Notification permission permanently denied');
+    } else if (statuses[Permission.notification] == PermissionStatus.granted) {
+      debugPrint('Notification permission granted');
+    }
+
+    if (statuses[Permission.locationWhenInUse] == PermissionStatus.denied) {
+      debugPrint('Location permission denied');
+    } else if (statuses[Permission.locationWhenInUse] == PermissionStatus.permanentlyDenied) {
+      debugPrint('Location permission permanently denied');
+    } else if (statuses[Permission.locationWhenInUse] == PermissionStatus.granted) {
+      debugPrint('Location permission granted');
+    } else if (statuses[Permission.locationWhenInUse] == PermissionStatus.limited) {
+      debugPrint('Location permission limited (iOS 14+)');
     }
   } catch (e) {
     debugPrint('Error requesting permissions: $e');
   }
 }
+
 void main() async {
+  FlutterError.onError = (FlutterErrorDetails details) {
+    final exception = details.exception.toString();
+    if (exception.contains('semantics') ||
+        exception.contains('parentDataDirty') ||
+        exception.contains('_needsLayout')) {
+      return;
+    }
+    FlutterError.presentError(details);
+  };
+
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Request permissions before Firebase initialization
-  await requestPermissions();
-
-  // Lock the app to portrait mode
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
 
-  var logger = Logger();
-  try {
-    logger.d("Logger is working!");
+  await Firebase.initializeApp();
 
-    // Initialize Firebase first
-    await Firebase.initializeApp(
-      options: const FirebaseOptions(
-        apiKey: 'AIzaSyCoqKGffVMkwU-QntZpBGGOP1raLV0JnkY',
-        appId: '1:685215974205:android:382cf5dcbd774cfa267b54',
-        messagingSenderId: '685215974205',
-        projectId: 'zing-cb51c',
-        storageBucket: 'zing-cb51c.appspot.com',
-      ),
-    );
-
-    // After Firebase is initialized, activate App Check
-    await FirebaseAppCheck.instance.activate(
-      androidProvider: AndroidProvider.debug,  // Change to appropriate provider for production
-      appleProvider: AppleProvider.debug,     // Change to appropriate provider for production
-    );
-
-    print("Firebase initialized successfully.");
-  } catch (e) {
-    print("Firebase initialization error: $e");
+  if (!kIsWeb && Platform.isIOS) {
+    debugPrint('Firebase initialized for iOS');
   }
+
+  await requestPermissions();
 
   runApp(
     MultiProvider(
@@ -90,11 +99,14 @@ void main() async {
         ChangeNotifierProvider(create: (_) => OfferProvider()..fetchOffers()),
         ChangeNotifierProvider(create: (_) => AdvertisementProvider()..fetchAdvertisements()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => RecommendationProvider()),
+        ChangeNotifierProvider(create: (_) => NotificationProvider()..startListening()),
       ],
-      child: const Zing(), // Add the const keyword in the correct place
+      child: const Zing(),
     ),
   );
 }
+
 class Zing extends StatelessWidget {
   const Zing({super.key});
 
@@ -106,39 +118,57 @@ class Zing extends StatelessWidget {
       theme: themeProvider.lightTheme,
       darkTheme: themeProvider.darkTheme,
       debugShowCheckedModeBanner: false,
-      initialRoute: '/auth',
-
+      initialRoute: '/home',
       routes: {
-        '/auth':(_) => AuthWrapper(),
+        '/auth': (_) => AuthWrapper(),
         '/splash': (_) => const SplashScreen(),
         '/onboarding': (_) => OnboardingScreen(),
         '/login': (_) => FirebaseLoginScreen(),
         '/createAccount': (_) => CreateAccountScreen(),
-        '/home': (_) => HomePageScreen(),
+        '/home': (_) => const MainShell(),
+        '/storeManagement': (_) => const StoreManagementWidget(),
+        '/adminPanel': (_) => AdminPanelDashboard(),
+        '/favorites': (_) => const FavouriteStoreScreen(),
+        '/help': (_) => const HelpSupportPlaceholderScreen(),
       },
     );
   }
 }
-// AuthWrapper to handle initial navigation based on login state
+
+class HelpSupportPlaceholderScreen extends StatelessWidget {
+  const HelpSupportPlaceholderScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Help & Support')),
+      body: const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'Help & Support is coming soon.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class AuthWrapper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
-        // If a user is logged in, go directly to HomeScreen
         if (snapshot.connectionState == ConnectionState.active) {
           User? user = snapshot.data;
           if (user == null) {
-            // If no user is logged in, show the SplashScreen
             return const SplashScreen();
           } else {
-            // If user is logged in, show the HomeScreen
-            return HomePageScreen();
+            return const MainShell();
           }
         }
-
-        // Show a loading screen while checking authentication state
         return const Scaffold(
           body: Center(child: CircularProgressIndicator()),
         );
@@ -147,110 +177,206 @@ class AuthWrapper extends StatelessWidget {
   }
 }
 
-
-
+// Simplified Splash Screen — clean gradient, logo scale-in, text fade-in, minimal progress
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  _SplashScreenState createState() => _SplashScreenState();
+  State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _logoAnimation;
-  late Animation<Offset> _textAnimation;
+class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMixin {
+  late AnimationController _logoController;
+  late AnimationController _progressController;
+
+  late Animation<double> _logoScale;
+  late Animation<double> _logoOpacity;
+  late Animation<double> _textOpacity;
+  late Animation<double> _progressValue;
 
   @override
   void initState() {
     super.initState();
 
-    // Initialize the animation controller for 3 seconds
-    _controller = AnimationController(
-      duration: const Duration(seconds: 3),
+    _logoController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
       vsync: this,
     );
 
-    // Define the scaling animation for the logo
-    _logoAnimation = Tween<double>(begin: 0.0, end: 1.0)
-        .animate(CurvedAnimation(parent: _controller, curve: Curves.elasticOut));
+    _progressController = AnimationController(
+      duration: const Duration(milliseconds: 2500),
+      vsync: this,
+    );
 
-    // Define a slide-up animation for the text
-    _textAnimation = Tween<Offset>(begin: const Offset(0, 1), end: const Offset(0, 0))
-        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+    _logoScale = Tween<double>(begin: 0.5, end: 1.0).animate(
+      CurvedAnimation(parent: _logoController, curve: Curves.easeOutBack),
+    );
 
-    // Start the animation
-    _controller.forward();
+    _logoOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _logoController, curve: const Interval(0.0, 0.6, curve: Curves.easeIn)),
+    );
 
-    // After 4 seconds, navigate to the onboarding screen
-    Future.delayed(const Duration(seconds: 4), () {
-      if (mounted) {
-        Navigator.pushReplacementNamed(context, '/onboarding');
-      }
+    _textOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _logoController, curve: const Interval(0.4, 1.0, curve: Curves.easeIn)),
+    );
+
+    _progressValue = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _progressController, curve: Curves.easeInOut),
+    );
+
+    _logoController.forward();
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted) _progressController.forward();
     });
+
+    Future.delayed(const Duration(milliseconds: 3500), () {
+      if (mounted) _navigateToNext();
+    });
+  }
+
+  void _navigateToNext() {
+    Navigator.of(context).pushReplacementNamed('/onboarding');
   }
 
   @override
   void dispose() {
-    _controller.dispose(); // Dispose animation controller when done
+    _logoController.dispose();
+    _progressController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+
     return Scaffold(
-      body: SafeArea(
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                Colors.black,
-                Colors.blue.shade900,
-                Colors.blue.shade700,
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              stops: const [0.2, 0.6, 1.0], // Control color transitions
-            ),
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              ZingColors.primaryDark,
+              ZingColors.primary,
+              ZingColors.primaryLight,
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Scale transition for the logo
-                ScaleTransition(
-                  scale: _logoAnimation,
-                  child: Image.asset(
-                    'assets/images/zing.png', // Replace with your logo path
-                    height: 200,
-                    width: 200,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                // Slide transition for the text
-                SlideTransition(
-                  position: _textAnimation,
-                  child: const Text(
-                    'Z I N G',
-                    style: TextStyle(
-                      fontSize: 30,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blueAccent,
-                      letterSpacing: 1.5,
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Spacer(flex: 3),
+
+              // Logo with scale-in
+              AnimatedBuilder(
+                animation: _logoController,
+                builder: (context, child) {
+                  return Transform.scale(
+                    scale: _logoScale.value,
+                    child: Opacity(
+                      opacity: _logoOpacity.value,
+                      child: Container(
+                        width: size.width * 0.35,
+                        height: size.width * 0.35,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.95),
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.15),
+                              blurRadius: 20,
+                              spreadRadius: 2,
+                              offset: const Offset(0, 5),
+                            ),
+                          ],
+                        ),
+                        child: Image.asset(
+                          'assets/images/zing.png',
+                          color: ZingColors.primaryDark,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                const Text(
-                  'MARKETING MASTERY',
-                  style: TextStyle(
-                    fontSize: 18,
-                    color: Colors.white70,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-              ],
-            ),
+                  );
+                },
+              ),
+
+              const SizedBox(height: 32),
+
+              // Title text fade-in
+              AnimatedBuilder(
+                animation: _logoController,
+                builder: (context, child) {
+                  return Opacity(
+                    opacity: _textOpacity.value,
+                    child: Column(
+                      children: [
+                        Text(
+                          'ZING',
+                          style: TextStyle(
+                            fontSize: 44,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 10,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'MARKETING MASTERY',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                            letterSpacing: 4,
+                            color: Colors.white.withOpacity(0.9),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+
+              const Spacer(flex: 2),
+
+              // Minimal progress bar
+              AnimatedBuilder(
+                animation: _progressController,
+                builder: (context, child) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 60),
+                    child: Column(
+                      children: [
+                        Container(
+                          height: 4,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: FractionallySizedBox(
+                              widthFactor: _progressValue.value,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.8),
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+
+              const SizedBox(height: 40),
+            ],
           ),
         ),
       ),

@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 // Adjust imports as needed
 import 'package:zing/Modal/CoustomUser.dart';
 import 'package:zing/Service/CoustomUserProvider.dart';
+import 'package:zing/Service/ThemeProvider.dart';
 import '../Service/ChatProvider.dart';
 import 'ChatScreen.dart';
 
@@ -110,24 +111,22 @@ class _OwnerChatListScreenState extends State<OwnerChatListScreen>
   @override
   Widget build(BuildContext context) {
     final chatProvider = Provider.of<ChatProvider>(context);
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           'Messages',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.bold,
+            color: cs.onPrimary,
+          ),
         ),
         centerTitle: true,
         elevation: 0,
-        flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF4A90E2), Color(0xFF50A5FF)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-        ),
+        backgroundColor: cs.primary,
+        foregroundColor: cs.onPrimary,
       ),
       body: FutureBuilder(
         future: chatProvider.fetchAllUserChats(widget.store.id!),
@@ -150,13 +149,7 @@ class _OwnerChatListScreenState extends State<OwnerChatListScreen>
               }
 
               return Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Color(0xFFF5F7FA), Color(0xFFEFF3F8)],
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                  ),
-                ),
+                color: cs.surface,
                 // Use the animations
                 child: SlideTransition(
                   position: _listSlideAnimation,
@@ -197,15 +190,9 @@ class _OwnerChatListScreenState extends State<OwnerChatListScreen>
                           child: Container(
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: cs.surface,
                               borderRadius: BorderRadius.circular(16),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.grey.withOpacity(0.15),
-                                  blurRadius: 12,
-                                  offset: const Offset(0, 6),
-                                ),
-                              ],
+                              boxShadow: ZingShadows.soft,
                             ),
                             child: Row(
                               children: [
@@ -229,9 +216,9 @@ class _OwnerChatListScreenState extends State<OwnerChatListScreen>
                                         height: 12,
                                         width: 12,
                                         decoration: BoxDecoration(
-                                          color: Colors.green,
+                                          color: ZingColors.success,
                                           shape: BoxShape.circle,
-                                          border: Border.all(color: Colors.white, width: 2),
+                                          border: Border.all(color: cs.surface, width: 2),
                                         ),
                                       ),
                                     ),
@@ -247,19 +234,17 @@ class _OwnerChatListScreenState extends State<OwnerChatListScreen>
                                         user != null
                                             ? user.name
                                             : "User: $customerId",
-                                        style: const TextStyle(
+                                        style: theme.textTheme.titleMedium?.copyWith(
                                           fontWeight: FontWeight.bold,
-                                          fontSize: 16,
-                                          color: Colors.black87,
+                                          color: cs.onSurface,
                                         ),
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
                                         lastMessage,
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          color: Colors.grey[600],
+                                        style: theme.textTheme.bodyMedium?.copyWith(
+                                          color: cs.onSurfaceVariant,
                                         ),
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
@@ -274,16 +259,15 @@ class _OwnerChatListScreenState extends State<OwnerChatListScreen>
                                   children: [
                                     Text(
                                       formattedTime,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey[500],
+                                      style: theme.textTheme.bodySmall?.copyWith(
+                                        color: cs.onSurfaceVariant,
                                       ),
                                     ),
                                     const SizedBox(height: 8),
-                                    const Icon(
+                                    Icon(
                                       Icons.arrow_forward_ios,
                                       size: 16,
-                                      color: Colors.grey,
+                                      color: cs.onSurfaceVariant,
                                     ),
                                   ],
                                 ),
@@ -305,6 +289,8 @@ class _OwnerChatListScreenState extends State<OwnerChatListScreen>
 
   // --------------------------------------------------------------------------
   Widget _buildEmptyState() {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -314,20 +300,18 @@ class _OwnerChatListScreenState extends State<OwnerChatListScreen>
             height: 150,
           ),
           const SizedBox(height: 16),
-          const Text(
+          Text(
             "No messages yet",
-            style: TextStyle(
-              fontSize: 20,
+            style: theme.textTheme.titleLarge?.copyWith(
               fontWeight: FontWeight.bold,
-              color: Colors.grey,
+              color: cs.onSurfaceVariant,
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             "Users who message your store will appear here.",
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: cs.onSurfaceVariant,
             ),
             textAlign: TextAlign.center,
           ),

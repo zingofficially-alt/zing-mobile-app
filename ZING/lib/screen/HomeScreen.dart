@@ -1,227 +1,340 @@
-import 'package:animate_do/animate_do.dart';
-import 'package:carousel_slider/carousel_options.dart';
-import 'package:carousel_slider/carousel_slider.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/cupertino.dart';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_spinkit/flutter_spinkit.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:zing/AdminPanal/AdminPanalDashBoard.dart';
-import 'package:zing/Cart/CartScreen.dart';
+import 'package:carousel_slider/carousel_slider.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+
 import 'package:zing/Modal/CoustomUser.dart';
 import 'package:zing/Service/CoustomUserProvider.dart';
 import 'package:zing/Service/StoreProvider.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:zing/screen/CompanyNavDrawer.dart';
-import 'package:zing/screen/StoreManagement/storeManagementScreen.dart';
-import 'package:zing/screen/StoreScreen/StoreScreen.dart';
-import 'package:zing/screen/UserScreens/FavouriteStoreScreen.dart';
-import 'package:zing/screen/UserScreens/UserProfile.dart';
-import 'package:shimmer/shimmer.dart';
-
-import '../Service/AdvertisementProvider.dart';
-import '../Service/OfferProvider.dart';
+import 'package:zing/Service/AdvertisementProvider.dart';
+import 'package:zing/Service/OfferProvider.dart';
+import 'package:zing/Service/ThemeProvider.dart';
+import 'package:zing/Service/RecommendationProvider.dart';
+import 'package:zing/Service/NotificationProvider.dart';
+import 'package:zing/Widgets/Shared/zing_store_card.dart';
+import 'package:zing/Widgets/Shared/zing_section_header.dart';
+import 'package:zing/Widgets/Shared/zing_shimmer.dart';
+import 'package:zing/Widgets/Recommendations/RecommendedStoresRow.dart';
+import 'package:zing/screen/NotificationsScreen.dart';
 
 class HomePageScreen extends StatefulWidget {
+  const HomePageScreen({super.key});
+
   @override
-  _HomePageScreenState createState() => _HomePageScreenState();
+  State<HomePageScreen> createState() => _HomePageScreenState();
 }
 
-class _HomePageScreenState extends State<HomePageScreen> {
+class _HomePageScreenState extends State<HomePageScreen> with TickerProviderStateMixin {
+  AnimationController? _loadingAnimationController;
+  AnimationController? _logoAnimationController;
+
+  String? _selectedCategory;
+  Position? _currentPosition;
+  bool _isMounted = true;
+  bool _isInitialized = false;
+
+  Map<String, double> _storeRatings = {};
+
+  final ScrollController _scrollController = ScrollController();
+
+  final List<_CategoryItem> _categories = [
+    _CategoryItem('Electronics', FontAwesomeIcons.laptop, const Color(0xFF5B7FFF), const Color(0xFFEBF0FF)),
+    _CategoryItem('Clothing', FontAwesomeIcons.tshirt, const Color(0xFFFF6B6B), const Color(0xFFFFECEE)),
+    _CategoryItem('Food', FontAwesomeIcons.utensils, const Color(0xFFFFAE33), const Color(0xFFFFF6E9)),
+    _CategoryItem('Sports', FontAwesomeIcons.basketballBall, const Color(0xFF43B97F), const Color(0xFFE6F8EF)),
+    _CategoryItem('Beauty', FontAwesomeIcons.sprayCan, const Color(0xFFD77FE3), const Color(0xFFF9EBFF)),
+    _CategoryItem('Education', FontAwesomeIcons.graduationCap, const Color(0xFF6C63FF), const Color(0xFFEBEAFF)),
+    _CategoryItem('Electrical', FontAwesomeIcons.bolt, const Color(0xFFFFA726), const Color(0xFFFFF3E0)),
+    _CategoryItem('Kids', FontAwesomeIcons.baby, const Color(0xFF4DB6AC), const Color(0xFFE0F2F1)),
+  ];
+
   @override
   void initState() {
     super.initState();
-    _pageController = PageController();
-    _selectedCategory = null;
-    _requestLocationPermission();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(milliseconds: 400), () {
+        if (mounted && _isMounted) _initializeScreen();
+      });
+    });
   }
 
-  final List<String> categories = [
-    'Electronics',
-    'Clothing',
-    'Food',
-    'Sports',
-    'Beauty',
-    'Education',
-    'Electrical',
-    'Kids',
-    'Mens',
-    'Womens',
-    'Phone',
-  ];
+  void _initializeScreen() {
+    if (!_isMounted || !mounted || _isInitialized) return;
 
-  int _selectedIndex = 0;
-  late PageController _pageController;
-  String _searchQuery = '';
-  Position? _currentPosition;
-  String? _selectedCategory;
+    setState(() => _isInitialized = true);
 
-  Future<void> _requestLocationPermission() async {
-    var status = await Permission.location.request();
+    _loadingAnimationController = AnimationController(
+      duration: const Duration(seconds: 2),
+      vsync: this,
+    )..repeat();
 
-    if (status.isGranted) {
-      _getCurrentLocation();
-    } else if (status.isDenied || status.isPermanentlyDenied) {
-      openAppSettings();
+    _logoAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 500),
+      vsync: this,
+    )..forward();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final recProvider = Provider.of<RecommendationProvider>(context, listen: false);
+      recProvider.logEvent(eventType: 'home-page-view');
+      recProvider.fetchRecommendations(placement: RecommendationProvider.homeRecommended);
+    });
+
+    Future.delayed(const Duration(milliseconds: 2000), () {
+      if (mounted && _isMounted) _checkAndGetLocation();
+    });
+  }
+
+  @override
+  void dispose() {
+    _isMounted = false;
+    _loadingAnimationController?.dispose();
+    _logoAnimationController?.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _checkAndGetLocation() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return;
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.deniedForever) return;
+
+      if (permission == LocationPermission.whileInUse || permission == LocationPermission.always) {
+        await _getCurrentLocation();
+      }
+    } catch (e) {
+      debugPrint('Error checking location: $e');
     }
   }
 
   Future<void> _getCurrentLocation() async {
     try {
+      Position? lastPosition = await Geolocator.getLastKnownPosition();
+      if (lastPosition != null && _isMounted && mounted) {
+        setState(() => _currentPosition = lastPosition);
+      }
+
       Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
-      setState(() {
-        _currentPosition = position;
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 100),
+      ).timeout(const Duration(seconds: 20), onTimeout: () {
+        if (_currentPosition != null) return _currentPosition!;
+        throw TimeoutException('Location request timed out');
       });
+
+      if (_isMounted && mounted) {
+        setState(() => _currentPosition = position);
+      }
     } catch (e) {
-      print('Error getting location: $e');
+      debugPrint('Error getting location: $e');
+    }
+  }
+
+  double? _calculateDistance(double storeLat, double storeLng) {
+    if (_currentPosition == null) return null;
+    return Geolocator.distanceBetween(
+      _currentPosition!.latitude, _currentPosition!.longitude, storeLat, storeLng,
+    ) / 1000;
+  }
+
+  void _loadStoreRatings(List<Store> stores) {
+    for (var store in stores) {
+      if (!_storeRatings.containsKey(store.id)) {
+        store.getAverageRating().then((rating) {
+          if (_isMounted && mounted) {
+            setState(() => _storeRatings[store.id!] = rating);
+          }
+        });
+      }
     }
   }
 
   @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final storeProvider = Provider.of<StoreProvider>(context);
     final userProvider = Provider.of<CustomUserProvider>(context);
+    final screenSize = MediaQuery.of(context).size;
 
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
+    if (!_isInitialized) {
+      return Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(color: cs.primary),
+        ),
+      );
+    }
 
-    return SafeArea(
-      child: Scaffold(
-        appBar: _buildAppBar(screenWidth, screenHeight, userProvider),
-        drawer: CompanyNavDrawer(),
-        body: OrientationBuilder(
-          builder: (context, orientation) {
-            return FutureBuilder<CustomUser?>(
-              future: userProvider.fetchUserDetails(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(child: Text('Error fetching user data: ${snapshot.error}'));
-                }
+    return Scaffold(
+      body: FutureBuilder<CustomUser?>(
+        future: userProvider.fetchUserDetails(),
+        builder: (context, snapshot) {
+          final user = snapshot.data;
+          return NestedScrollView(
+            controller: _scrollController,
+            headerSliverBuilder: (context, innerBoxIsScrolled) {
+              return [_buildAppBar(screenSize, user, theme)];
+            },
+            body: storeProvider.isLoading
+                ? _buildShimmerLoading(screenSize, theme)
+                : _buildHomeContent(storeProvider, user, screenSize, theme),
+          );
+        },
+      ),
+    );
+  }
 
-                final user = snapshot.data;
+  // Clean white app bar with ZING logo left, notification bell right
+  SliverAppBar _buildAppBar(Size screenSize, CustomUser? user, ThemeData theme) {
+    final cs = theme.colorScheme;
 
-                if (user == null) {
-                  return Center(
-                    child: Column(
-                      children: [
-                        Text('User not found'),
-                        SpinKitFadingCircle(
-                          color: Colors.blue,
-                          size: screenWidth * 0.2,
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                return PageView(
-                  controller: _pageController,
-                  onPageChanged: (index) {
-                    setState(() {
-                      _selectedIndex = index;
-                    });
-                  },
-                  physics: BouncingScrollPhysics(),
+    return SliverAppBar(
+      expandedHeight: 120,
+      floating: true,
+      pinned: true,
+      snap: false,
+      elevation: 0,
+      scrolledUnderElevation: 0.5,
+      backgroundColor: cs.surface,
+      surfaceTintColor: Colors.transparent,
+      automaticallyImplyLeading: false,
+      flexibleSpace: FlexibleSpaceBar(
+        background: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(ZingSpacing.lg, ZingSpacing.sm, ZingSpacing.lg, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Logo row
+                Row(
                   children: [
-                    _wrapWithAnimation(
-                      _buildHomePage(storeProvider, user, screenWidth, screenHeight, orientation),
-                      animationType: AnimationType.fadeIn,
+                    Image.asset('assets/images/zing.png', height: 28, color: cs.primary),
+                    const SizedBox(width: 8),
+                    Text('ZING', style: theme.textTheme.headlineMedium?.copyWith(
+                      letterSpacing: 1.5,
+                      fontWeight: FontWeight.w800,
+                      color: cs.primary,
+                    )),
+                    const Spacer(),
+                    // Notification bell
+                    Consumer<NotificationProvider>(
+                      builder: (context, notifProvider, _) {
+                        return IconButton(
+                          onPressed: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                          ),
+                          icon: Badge(
+                            isLabelVisible: notifProvider.unreadCount > 0,
+                            label: Text('${notifProvider.unreadCount}'),
+                            backgroundColor: cs.secondary,
+                            child: Icon(Icons.notifications_outlined, color: cs.onSurface),
+                          ),
+                        );
+                      },
                     ),
-                    _wrapWithAnimation(
-                      FavouriteStoreScreen(),
-                      animationType: AnimationType.bounceIn,
-                    ),
-                    _wrapWithAnimation(
-                      CartScreen(userId: user.id),
-                      animationType: AnimationType.slideInLeft,
-                    ),
-                    _wrapWithAnimation(
-                      UserProfilePage(),
-                      animationType: AnimationType.slideInRight,
-                    ),
-                    if (user.role == 'Owner' || user.role == "Admin")
-                      _wrapWithAnimation(
-                        StoreManagementWidget(),
-                        animationType: AnimationType.zoomIn,
-                      ),
-                    if (user.role == 'Admin')
-                      _wrapWithAnimation(
-                        AdminPanelDashboard(),
-                        animationType: AnimationType.slideInUp,
+                    // Profile avatar
+                    if (user != null)
+                      CircleAvatar(
+                        radius: 18,
+                        backgroundColor: cs.surfaceContainerHighest,
+                        backgroundImage: user.profileImageUrl.isNotEmpty
+                            ? NetworkImage(user.profileImageUrl)
+                            : null,
+                        child: user.profileImageUrl.isEmpty
+                            ? Text(
+                                user.name.isNotEmpty ? user.name[0].toUpperCase() : '?',
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  color: cs.primary, fontWeight: FontWeight.w700),
+                              )
+                            : null,
                       ),
                   ],
-                );
-              },
-            );
-          },
-        ),
-        bottomNavigationBar: _buildBottomNavigationBar(userProvider.user, screenWidth),
-      ),
-    );
-  }
-
-  Widget _buildHomePage(StoreProvider storeProvider, CustomUser user, double screenWidth, double screenHeight, Orientation orientation) {
-    return storeProvider.isLoading
-        ? _buildShimmerGrid(screenWidth, screenHeight)
-        : _buildContentGrid(storeProvider, user, screenWidth, screenHeight, orientation);
-  }
-
-  Widget _buildShimmerGrid(double screenWidth, double screenHeight) {
-    return GridView.builder(
-      padding: EdgeInsets.all(screenWidth * 0.04),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: screenWidth * 0.04,
-        mainAxisSpacing: screenHeight * 0.02,
-        childAspectRatio: 0.75,
-      ),
-      itemCount: 6,
-      itemBuilder: (context, index) {
-        return Shimmer.fromColors(
-          baseColor: Colors.grey[300]!,
-          highlightColor: Colors.grey[100]!,
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.grey[300],
-              borderRadius: BorderRadius.circular(16),
+                ),
+                const SizedBox(height: 12),
+                // Welcome text
+                Text(
+                  'Welcome${user?.name != null && user!.name.isNotEmpty ? ", ${user.name.split(' ')[0]}" : ""}',
+                  style: theme.textTheme.headlineSmall,
+                ),
+              ],
             ),
           ),
-        );
-      },
+        ),
+        titlePadding: EdgeInsets.zero,
+      ),
     );
   }
-  Widget _buildContentGrid(
-      StoreProvider storeProvider,
-      CustomUser user,
-      double screenWidth,
-      double screenHeight,
-      Orientation orientation,
-      ) {
-    // Filter stores based on search query and selected category
+
+  Widget _buildShimmerLoading(Size screenSize, ThemeData theme) {
+    return CustomScrollView(
+      physics: const BouncingScrollPhysics(),
+      slivers: [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.only(top: ZingSpacing.md, bottom: ZingSpacing.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: ZingSpacing.lg),
+                  child: ZingShimmer.box(height: screenSize.height * 0.2, borderRadius: 20),
+                ),
+                const SizedBox(height: ZingSpacing.xl),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: ZingSpacing.lg),
+                  child: ZingShimmer.box(width: screenSize.width * 0.4, height: 24),
+                ),
+                const SizedBox(height: ZingSpacing.md),
+                SizedBox(
+                  height: 110,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    itemCount: 6,
+                    itemBuilder: (_, __) => Padding(
+                      padding: const EdgeInsets.only(right: 16),
+                      child: Column(
+                        children: [
+                          ZingShimmer.circle(size: 70),
+                          const SizedBox(height: 8),
+                          ZingShimmer.box(width: 60, height: 12),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHomeContent(StoreProvider storeProvider, CustomUser? user, Size screenSize, ThemeData theme) {
+    final cs = theme.colorScheme;
+
     List<Store> filteredStores = storeProvider.stores.where((store) {
-      return (_selectedCategory == null || store.category == _selectedCategory) &&
-          store.products.any((product) =>
-              product.name.toLowerCase().contains(_searchQuery));
+      return _selectedCategory == null || store.category == _selectedCategory;
     }).toList();
+
+    _loadStoreRatings(filteredStores);
 
     List<Store> nearbyStores = [];
     List<Store> otherStores = [];
 
-    // Categorize stores by proximity
-    for (Store store in filteredStores) {
-      double? distance = _calculateDistance(store.location.latitude, store.location.longitude);
+    for (var store in filteredStores) {
+      final distance = _calculateDistance(store.location.latitude, store.location.longitude);
       if (distance != null && distance <= 5) {
         nearbyStores.add(store);
       } else {
@@ -229,966 +342,362 @@ class _HomePageScreenState extends State<HomePageScreen> {
       }
     }
 
-    // Sort other stores by distance
     otherStores.sort((a, b) {
-      double? distanceA = _calculateDistance(a.location.latitude, a.location.longitude);
-      double? distanceB = _calculateDistance(b.location.latitude, b.location.longitude);
-      if (distanceA == null || distanceB == null) return 0;
-      return distanceA.compareTo(distanceB);
+      final dA = _calculateDistance(a.location.latitude, a.location.longitude) ?? double.infinity;
+      final dB = _calculateDistance(b.location.latitude, b.location.longitude) ?? double.infinity;
+      return dA.compareTo(dB);
     });
 
-    return ListView(
-      padding: EdgeInsets.symmetric(vertical: screenHeight * 0.02),
-      children: [
-        // Offer Section
-        _buildOfferSection(screenWidth, screenHeight),
-          SizedBox(height: 20,),
-        // Category Selector with Chips
-        _buildCategorySelector(screenWidth, screenHeight, orientation),
-
-        // Nearby Stores Section
-        if (nearbyStores.isNotEmpty)
-          Padding(
-            padding: EdgeInsets.symmetric(vertical: screenHeight * 0.01, horizontal: screenWidth * 0.04),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Nearby Stores',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: screenWidth * 0.05,
-                  ),
-                ),
-                SizedBox(height: screenHeight * 0.01),
-                _buildStoreGrid(nearbyStores, user, screenWidth, screenHeight, orientation),
-              ],
-            ),
-          ),
-
-        // Other Stores Section
-        if (otherStores.isNotEmpty)
-          Padding(
-            padding: EdgeInsets.symmetric(vertical: screenHeight * 0.01, horizontal: screenWidth * 0.04),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Other Stores (Sorted by Distance)',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: screenWidth * 0.05,
-                  ),
-                ),
-                SizedBox(height: screenHeight * 0.01),
-                _buildStoreGrid(otherStores, user, screenWidth, screenHeight, orientation),
-              ],
-            ),
-          ),
-
-        // Empty State
-        if (filteredStores.isEmpty && _searchQuery.isNotEmpty)
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.1, vertical: screenHeight * 0.1),
-            child: Column(
-              children: [
-                Icon(
-                  Icons.search_off,
-                  size: screenWidth * 0.2,
-                  color: Colors.grey.shade400,
-                ),
-                SizedBox(height: screenHeight * 0.02),
-                Text(
-                  'No stores found for your search.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: screenWidth * 0.045,
-                    color: Colors.grey.shade600,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-                Text(
-                  'Try adjusting your search or selecting a different category.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: screenWidth * 0.04,
-                    color: Colors.grey.shade600,
-                  ),
-                ),
-
-              ],
-            ),
-          ),
-        SizedBox(height: 20,),
-        _buildAdvertisementSection(screenWidth, screenHeight)
-      ],
-    );
-  }
-
-  Widget _buildOfferSection(double screenWidth, double screenHeight) {
-    return Consumer<OfferProvider>(
-      builder: (context, offerProvider, child) {
-        print('Offers length: ${offerProvider.offers.length}');  // Debugging log
-
-        // Show a loading spinner if data is still being fetched
-        if (offerProvider.isLoading) {
-          return Center(child: CircularProgressIndicator());
-        }
-
-        if (offerProvider.offers.isEmpty) {
-          return Center(
-            child: Text(
-              'No offers available at the moment.',
-              style: TextStyle(fontSize: 16),
-            ),
-          );
-        }
-
-        return Padding(
-          padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.04),
-          child: CarouselSlider.builder(
-            itemCount: offerProvider.offers.length,
-            itemBuilder: (context, index, realIndex) {
-              final offer = offerProvider.offers[index];
-              return Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(15),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black26,
-                      blurRadius: 10,
-                      spreadRadius: 2,
-                      offset: Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(15),
-                  child: Image.network(
-                    offer.imageUrl,
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    loadingBuilder: (context, child, loadingProgress) {
-                      if (loadingProgress == null) return child;
-                      return Center(child: CircularProgressIndicator());
-                    },
-                    errorBuilder: (context, error, stackTrace) {
-                      return Center(child: Icon(Icons.error));
-                    },
-                  ),
-                ),
-              );
-            },
-            options: CarouselOptions(
-              height: screenHeight * 0.2,
-              viewportFraction: 0.9,
-              autoPlay: true,
-              autoPlayInterval: Duration(seconds: 3),
-              enlargeCenterPage: true,
-              aspectRatio: 16 / 9,
-            ),
-          ),
-        );
+    return RefreshIndicator(
+      onRefresh: () async {
+        await storeProvider.fetchStores();
+        return Future.delayed(const Duration(milliseconds: 300));
       },
-    );
-  }
-
-
-  Widget _buildAdvertisementSection(double screenWidth, double screenHeight) {
-    return Consumer<AdvertisementProvider>(
-      builder: (context, advertisementProvider, child) {
-        if (advertisementProvider.isLoading) {
-          return Center(child: CircularProgressIndicator());
-        }
-
-        if (advertisementProvider.errorMessage.isNotEmpty) {
-          return Center(
-            child: Text(
-              advertisementProvider.errorMessage,
-              style: TextStyle(fontSize: 16, ),
-            ),
-          );
-        }
-
-        if (advertisementProvider.advertisements.isEmpty) {
-          return Center(
-            child: Text(
-              'No advertisements available.',
-              style: TextStyle(fontSize: 16),
-            ),
-          );
-        }
-
-        return CarouselSlider.builder(
-          itemCount: advertisementProvider.advertisements.length,
-          itemBuilder: (context, index, realIndex) {
-            final ad = advertisementProvider.advertisements[index];
-            return ClipRRect(
-              borderRadius: BorderRadius.circular(15),
-              child: Image.network(
-                ad.imageUrl,
-                fit: BoxFit.cover,
-                width: double.infinity,
-              ),
-            );
-          },
-          options: CarouselOptions(
-            height: screenHeight * 0.2,
-            autoPlay: true,
-            enlargeCenterPage: true,
-          ),
-        );
-      },
-    );
-  }
-
-
-  Widget _buildCategorySelector(double screenWidth, double screenHeight, Orientation orientation) {
-    final isPortrait = orientation == Orientation.portrait;
-
-    return SizedBox(
-      height: isPortrait ? screenHeight * 0.15 : screenHeight * 0.25,
-      child: ListView.builder(
-        padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.02),
-        physics: BouncingScrollPhysics(),  // Adds bouncing scroll effect
-        scrollDirection: Axis.horizontal,
-        itemCount: categories.length,
-        itemBuilder: (context, index) {
-          final category = categories[index];
-          final isSelected = _selectedCategory == category;
-
-          return FadeInLeft(
-            delay: Duration(milliseconds: 50 * index),  // Faster animation
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.01),
-              child: Hero(  // Add Hero animation for smooth transitions
-                tag: 'category_$category',
-                child: Material(  // Needed for Hero animation
-                  color: Colors.transparent,
-                  child: InkWell(  // Better touch feedback
-                    borderRadius: BorderRadius.circular(screenWidth * 0.03),
-                    onTap: () {
-                      HapticFeedback.lightImpact();  // Add haptic feedback
-                      setState(() {
-                        if (isSelected) {
-                          _selectedCategory = null;
-                        } else {
-                          _selectedCategory = category;
-                        }
-                      });
-                    },
-                    child: AnimatedContainer(
-                      duration: Duration(milliseconds: 200),
-                      curve: Curves.easeOutCubic,
-                      padding: EdgeInsets.all(screenWidth * 0.02),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(screenWidth * 0.03),
-                        boxShadow: isSelected ? [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 8,
-                            offset: Offset(0, 4),
-                          )
-                        ] : null,
-                        border: Border.all(
-                          color: isSelected ? Colors.blueAccent : Colors.transparent,
-                          width: 2,
-                        ),
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              AnimatedContainer(
-                                duration: Duration(milliseconds: 200),
-                                width: screenWidth * 0.16,
-                                height: screenWidth * 0.16,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(screenWidth * 0.02),
-                                  border: Border.all(
-                                    color: isSelected ? Colors.blueAccent : Colors.grey.withOpacity(0.3),
-                                    width: 2,
-                                  ),
-                                  image: DecorationImage(
-                                    image: AssetImage(
-                                      'assets/images/${category.toLowerCase()}.jpg',
-                                    ),
-                                    fit: BoxFit.cover,
-                                    colorFilter: isSelected ? null : ColorFilter.mode(
-                                      Colors.grey.withOpacity(0.2),
-                                      BlendMode.saturation,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              if (isSelected)
-                                Container(
-                                  width: screenWidth * 0.16,
-                                  height: screenWidth * 0.16,
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(screenWidth * 0.02),
-                                    border: Border.all(
-                                      color: Colors.blueAccent,
-                                      width: 2,
-                                    ),
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                      colors: [
-                                        Colors.blue.withOpacity(0.2),
-                                        Colors.transparent,
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          SizedBox(height: screenHeight * 0.01),
-                          AnimatedDefaultTextStyle(
-                            duration: Duration(milliseconds: 200),
-                            style: TextStyle(
-                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                              fontSize: screenWidth * 0.04,
-                              color: isSelected ? Colors.red : Colors.lightBlueAccent,
-                            ),
-                            child: Text(category),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-  double? _calculateDistance(double storeLat, double storeLng) {
-    if (_currentPosition == null) {
-      print('User location is not available');
-      return null;
-    }
-    return Geolocator.distanceBetween(
-      _currentPosition!.latitude,
-      _currentPosition!.longitude,
-      storeLat,
-      storeLng,
-    ) / 1000;
-  }
-
-  Widget _buildStoreGrid(
-      List<Store> stores,
-      CustomUser user,
-      double screenWidth,
-      double screenHeight,
-      Orientation orientation) {
-    final customUserProvider = Provider.of<CustomUserProvider>(context, listen: false);
-    final isPortrait = orientation == Orientation.portrait;
-
-    return Container(
-      height: isPortrait ? screenHeight * 0.35 : screenHeight * 0.6,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        itemCount: stores.length,
-        physics: BouncingScrollPhysics(), // Smoother scrolling experience
-        padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.02), // Padding for the list
-        itemBuilder: (context, index) {
-          final store = stores[index];
-          final distance = _calculateDistance(store.location.latitude, store.location.longitude);
-          final isFavorite = customUserProvider.isFavoriteStore(store.id!);
-
-          return Hero( // Added Hero animation for smooth transitions
-            tag: 'store-${store.id}',
-            child: Material( // Wrap with Material for better touch feedback
-              color: Colors.transparent,
-              child: InkWell( // Replace GestureDetector with InkWell for better touch feedback
-                borderRadius: BorderRadius.circular(20),
-                onTap: () {
-                  HapticFeedback.lightImpact(); // Add haptic feedback
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => StoreDetailScreen(store: store, user: user),
-                    ),
-                  );
-                },
-                child: FadeIn(
-                  delay: Duration(milliseconds: 100 * index),
-                  child: Container(
-                    width: screenWidth * 0.45,
-                    margin: EdgeInsets.symmetric(
-                      horizontal: screenWidth * 0.02,
-                      vertical: screenHeight * 0.01, // Added vertical margin
-                    ),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black12,
-                          blurRadius: 15,
-                          spreadRadius: 2,
-                          offset: Offset(0, 8),
-                        ),
-                      ],
-                    ),
-                    child: ClipRRect( // Clip the image
-                      borderRadius: BorderRadius.circular(20),
-                      child: Stack(
-                        children: [
-                          // Image with shimmer loading effect
-                          ShaderMask(
-                            shaderCallback: (rect) {
-                              return LinearGradient(
-                                colors: [Colors.black.withOpacity(0.6), Colors.transparent],
-                                begin: Alignment.bottomCenter,
-                                end: Alignment.topCenter,
-                              ).createShader(rect);
-                            },
-                            blendMode: BlendMode.darken,
-                            child: Image.network(
-                              store.imageUrl,
-                              fit: BoxFit.cover,
-                              height: double.infinity,
-                              width: double.infinity,
-                              loadingBuilder: (context, child, loadingProgress) {
-                                if (loadingProgress == null) return child;
-                                return ShimmerLoading(); // Custom shimmer loading widget
-                              },
-                              errorBuilder: (context, error, stackTrace) {
-                                return Container(
-                                  child: Icon(Icons.error, color: Colors.red),
-                                );
-                              },
-                            ),
-                          ),
-
-                          // Favorite button
-                          Positioned(
-                            top: screenHeight * 0.02,
-                            right: screenWidth * 0.02,
-                            child: Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                customBorder: CircleBorder(),
-                                onTap: () {
-                                  HapticFeedback.selectionClick();
-                                  setState(() {
-                                    if (isFavorite) {
-                                      customUserProvider.removeFavoriteStore(store.id!);
-                                    } else {
-                                      customUserProvider.addFavoriteStore(store.id!);
-                                    }
-                                  });
-                                },
-                                child: AnimatedContainer(
-                                  duration: Duration(milliseconds: 300),
-                                  padding: EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: Colors.black26,
-                                  ),
-                                  child: AnimatedSwitcher(
-                                    duration: Duration(milliseconds: 300),
-                                    transitionBuilder: (child, animation) {
-                                      return ScaleTransition(
-                                        child: child,
-                                        scale: animation,
-                                      );
-                                    },
-                                    child: Icon(
-                                      isFavorite ? Icons.favorite : Icons.favorite_border,
-                                      color: isFavorite ? Colors.red : Colors.white,
-                                      size: screenWidth * 0.06,
-                                      key: ValueKey(isFavorite),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-
-                          // Store information
-                          Positioned(
-                            bottom: 0,
-                            left: 0,
-                            right: 0,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  colors: [
-                                    Colors.white38,
-                                    Colors.white24,
-                                  ],
-                                  begin: Alignment.bottomCenter,
-                                  end: Alignment.topCenter,
-                                ),
-                                borderRadius: BorderRadius.only(
-                                  bottomLeft: Radius.circular(20),
-                                  bottomRight: Radius.circular(20),
-                                ),
-                              ),
-                              padding: EdgeInsets.all(screenWidth * 0.03),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    store.name,
-                                    style: TextStyle(
-                                      fontSize: screenWidth * 0.045,
-                                      fontWeight: FontWeight.bold,
-                                      letterSpacing: 0.5,
-                                      shadows: [
-                                        Shadow(
-                                          color: Colors.black54,
-                                          offset: Offset(0, 1),
-                                          blurRadius: 2,
-                                        ),
-                                      ],
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  SizedBox(height: screenHeight * 0.008),
-                                  Row(
-                                    children: [
-                                      Icon(
-                                        Icons.star_rounded,
-                                        size: screenWidth * 0.045,
-                                      ),
-                                      SizedBox(width: screenWidth * 0.01),
-                                      FutureBuilder<double>(
-                                        future: store.getAverageRating(),
-                                        builder: (context, snapshot) {
-                                          return Text(
-                                            snapshot.data?.toStringAsFixed(1) ?? '0.0',
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                      Spacer(),
-                                      Icon(
-                                        Icons.location_on_outlined,
-                                        color: Colors.white70,
-                                        size: screenWidth * 0.04,
-                                      ),
-                                      SizedBox(width: screenWidth * 0.01),
-                                      Text(
-                                        distance != null ? '${distance.toStringAsFixed(1)} km' : 'N/A',
-                                        style: TextStyle(
-                                          color: Colors.white70,
-                                          fontSize: screenWidth * 0.035,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  SizedBox(height: screenHeight * 0.008),
-                                  Container(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: screenWidth * 0.02,
-                                      vertical: screenHeight * 0.003,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white24,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Text(
-                                      store.category,
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: screenWidth * 0.03,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-  Widget _buildBottomNavigationBar(CustomUser? user, double screenWidth) {
-    List<BottomNavigationBarItem> items = [
-      BottomNavigationBarItem(
-        icon: AnimatedSwitcher(
-          duration: Duration(milliseconds: 300),
-          child: Icon(
-            Icons.home,
-            key: ValueKey<int>(_selectedIndex == 0 ? 0 : -1),
-            color: _selectedIndex == 0 ? Colors.blueAccent : Colors.grey.shade600,
-            size: _selectedIndex == 0 ? screenWidth * 0.09 : screenWidth * 0.08,
-          ),
-        ),
-        label: 'Home',
-      ),
-      BottomNavigationBarItem(
-        icon: AnimatedSwitcher(
-          duration: Duration(milliseconds: 300),
-          child: Icon(
-            Icons.favorite,
-            key: ValueKey<int>(_selectedIndex == 1 ? 1 : -1),
-            color: _selectedIndex == 1 ? Colors.blueAccent : Colors.grey.shade600,
-            size: _selectedIndex == 1 ? screenWidth * 0.09 : screenWidth * 0.08,
-          ),
-        ),
-        label: 'Favourites',
-      ),
-      BottomNavigationBarItem(
-        icon: AnimatedSwitcher(
-          duration: Duration(milliseconds: 300),
-          child: Icon(
-            Icons.add_shopping_cart,
-            key: ValueKey<int>(_selectedIndex == 2 ? 2 : -1),
-            color: _selectedIndex == 2 ? Colors.blueAccent : Colors.grey.shade600,
-            size: _selectedIndex == 2 ? screenWidth * 0.09 : screenWidth * 0.08,
-          ),
-        ),
-        label: 'Cart',
-      ),
-      BottomNavigationBarItem(
-        icon: AnimatedSwitcher(
-          duration: Duration(milliseconds: 300),
-          child: Icon(
-            Icons.person,
-            key: ValueKey<int>(_selectedIndex == 3 ? 3 : -1),
-            color: _selectedIndex == 3 ? Colors.blueAccent : Colors.grey.shade600,
-            size: _selectedIndex == 3 ? screenWidth * 0.09 : screenWidth * 0.08,
-          ),
-        ),
-        label: 'User',
-      ),
-    ];
-
-    if (user?.role == 'Owner' || user?.role == "Admin") {
-      items.add(BottomNavigationBarItem(
-        icon: AnimatedSwitcher(
-          duration: Duration(milliseconds: 300),
-          child: Icon(
-            Icons.store,
-            key: ValueKey<int>(_selectedIndex == 4 ? 4 : -1),
-            color: _selectedIndex == 4 ? Colors.blueAccent : Colors.grey.shade600,
-            size: _selectedIndex == 4 ? screenWidth * 0.09 : screenWidth * 0.08,
-          ),
-        ),
-        label: 'Owner',
-      ));
-    }
-
-    if (user?.role == 'Admin') {
-      items.add(BottomNavigationBarItem(
-        icon: AnimatedSwitcher(
-          duration: Duration(milliseconds: 300),
-          child: Icon(
-            Icons.admin_panel_settings,
-            key: ValueKey<int>(_selectedIndex == 5 ? 5 : -1),
-            color: _selectedIndex == 5 ? Colors.blueAccent : Colors.grey.shade600,
-            size: _selectedIndex == 5 ? screenWidth * 0.09 : screenWidth * 0.08,
-          ),
-        ),
-        label: 'Admin',
-      ));
-    }
-
-    return Container(
-      margin: EdgeInsets.only(bottom: 10), // Slight margin for better placement
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Colors.blueAccent.withOpacity(0.1), Colors.white],
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-        ),
-        borderRadius: BorderRadius.circular(30),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black26,
-            spreadRadius: 3,
-            blurRadius: 8,
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(30),
-        child: BottomNavigationBar(
-          currentIndex: _selectedIndex,
-          onTap: (index) {
-            setState(() {
-              _selectedIndex = index;
-            });
-            _pageController.animateToPage(
-              index,
-              duration: Duration(milliseconds: 300),
-              curve: Curves.easeInOut,
-            );
-          },
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: Colors.white,
-          selectedItemColor: Colors.blueAccent,
-          unselectedItemColor: Colors.grey.shade600,
-          selectedIconTheme: IconThemeData(
-            size: screenWidth * 0.09,
-            color: Colors.blueAccent,
-          ),
-          unselectedIconTheme: IconThemeData(
-            size: screenWidth * 0.08,
-            color: Colors.grey.shade600,
-          ),
-          selectedLabelStyle: GoogleFonts.roboto(
-            fontSize: screenWidth * 0.04,
-            fontWeight: FontWeight.bold,
-          ),
-          unselectedLabelStyle: GoogleFonts.roboto(
-            fontSize: screenWidth * 0.03,
-          ),
-          items: items,
-        ),
-      ),
-    );
-  }
-  AppBar _buildAppBar(double screenWidth, double screenHeight, CustomUserProvider userProvider) {
-    return AppBar(
-      elevation: 0,
-      backgroundColor: Colors.transparent,
-      flexibleSpace: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              Colors.indigoAccent.shade100,
-              Colors.indigoAccent.shade700,
-            ],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-      ),
-      leading: Builder(
-        builder: (context) => IconButton(
-          icon: Icon(Icons.menu, color: Colors.white, size: screenWidth * 0.07),
-          onPressed: () {
-            Scaffold.of(context).openDrawer(); // Opens the navigation drawer
-          },
-          splashRadius: screenWidth * 0.06 > 0 ? screenWidth * 0.06 : null, // Ensure splashRadius is valid
-          tooltip: 'Menu',
-        ),
-      ),
-      title: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            height: screenHeight * 0.05,
-            child: Image.asset('assets/images/zing.png'),
-          ),
-          SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Text(
-                "Z I N G",
-                style: TextStyle(
-                  fontSize: screenWidth * 0.03,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  letterSpacing: 1.5,
-                  shadows: [
-                    Shadow(
-                      blurRadius: 4,
-                      color: Colors.black45,
-                      offset: Offset(1, 2),
-                    ),
-                  ],
-                ),
-              ),
-              Text(
-                "MARKETING MASTERY",
-                style: TextStyle(
-                  fontSize: screenWidth * 0.02,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white70,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-      centerTitle: true,
-      actions: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          child: GestureDetector(
-              onTap: () {
-                // Add any action here, such as opening the profile page
-              },
-              child: IconButton(
-                onPressed: ()async {
-                  await Provider.of<CustomUserProvider>(context, listen: false).signOut();
-                  Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
-                },
-                icon: Row(
-                  children: [
-                    Icon(Icons.logout), // Wrap the icon in Icon widget
-                  ],
-                ),
-              )
-          ),
-        ),
-      ],
-      bottom: PreferredSize(
-        preferredSize: Size.fromHeight(screenHeight * 0.08),
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.04, vertical: screenHeight * 0.02),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withOpacity(0.3),
-                  spreadRadius: 2,
-                  blurRadius: 6,
-                  offset: Offset(0, 2),
-                ),
-              ],
-            ),
-            child: TextField(
-              decoration: InputDecoration(
-                hintText: 'Search for products...',
-                hintStyle: TextStyle(
-                  fontSize: screenWidth * 0.035,
-                ),
-                prefixIcon: Icon(
-                  Icons.search,
-
-                  size: screenWidth * 0.06,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide.none,
-                ),
-                filled: true,
-
-                contentPadding: EdgeInsets.symmetric(vertical: screenHeight * 0.02),
-              ),
-              onChanged: (value) {
-                setState(() {
-                  _searchQuery = value.toLowerCase();
-                });
-              },
+      color: cs.primary,
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+        slivers: [
+          const SliverToBoxAdapter(child: SizedBox(height: ZingSpacing.md)),
+          // Offer carousel
+          SliverToBoxAdapter(child: _buildOfferCarousel(screenSize, theme)),
+          // Categories
+          SliverToBoxAdapter(
+            child: ZingSectionHeader(
+              title: 'Categories',
+              actionText: _selectedCategory != null ? 'Clear' : null,
+              onAction: () => setState(() => _selectedCategory = null),
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-
-  Widget _buildListTile({
-    required IconData icon,
-    required String title,
-    required Color iconColor,
-    required double screenWidth,
-  }) {
-    return ListTile(
-      leading: Container(
-        padding: EdgeInsets.all(screenWidth * 0.03),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: LinearGradient(
-            colors: [iconColor.withOpacity(0.8), iconColor],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+          SliverToBoxAdapter(child: _buildCategorySelector(theme)),
+          // Recommendations
+          SliverToBoxAdapter(
+            child: RecommendedStoresRow(
+              placement: RecommendationProvider.homeRecommended,
+              sectionTitle: 'Recommended for You',
+              user: user,
+            ),
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black12,
-              blurRadius: 6,
-              offset: Offset(2, 2),
+          // Nearby stores
+          if (nearbyStores.isNotEmpty) ...[
+            SliverToBoxAdapter(
+              child: ZingSectionHeader(
+                title: 'Nearby Stores',
+                icon: Icons.location_on_rounded,
+                iconColor: cs.primary,
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: SizedBox(
+                height: 260,
+                child: _buildStoresList(nearbyStores, user),
+              ),
             ),
           ],
-        ),
-        child: Icon(
-          icon,
-          color: Colors.white,
-          size: screenWidth * 0.06,
-        ),
-      ),
-      title: Text(
-        title,
-        style: TextStyle(
-          fontSize: screenWidth * 0.04,
-          fontWeight: FontWeight.w600,
-          color: Colors.grey.shade800,
-        ),
-      ),
-      onTap: () {
-        // Add navigation or actions here
-      },
-      trailing: Icon(Icons.arrow_forward_ios, color: Colors.grey.shade400, size: screenWidth * 0.04),
-      tileColor: Colors.grey.shade100.withOpacity(0.5),
-      hoverColor: Colors.grey.shade200.withOpacity(0.7),
-      contentPadding: EdgeInsets.symmetric(horizontal: screenWidth * 0.05, vertical: screenWidth * 0.03),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    );
-  }
-  Widget _wrapWithAnimation(Widget child, {required AnimationType animationType}) {
-    switch (animationType) {
-      case AnimationType.fadeIn:
-        return FadeIn(child: child, duration: Duration(milliseconds: 500));
-      case AnimationType.bounceIn:
-        return Bounce(child: child, duration: Duration(milliseconds: 500));
-      case AnimationType.slideInLeft:
-        return SlideInLeft(child: child, duration: Duration(milliseconds: 500));
-      case AnimationType.slideInRight:
-        return SlideInRight(child: child, duration: Duration(milliseconds: 500));
-      case AnimationType.slideInUp:
-        return SlideInUp(child: child, duration: Duration(milliseconds: 500));
-      case AnimationType.zoomIn:
-        return ZoomIn(child: child, duration: Duration(milliseconds: 500));
-      default:
-        return child;
-    }
-  }
-}
-enum AnimationType {
-  fadeIn,
-  bounceIn,
-  slideInLeft,
-  slideInRight,
-  slideInUp,
-  zoomIn,
-}
-
-class ShimmerLoading extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Shimmer.fromColors(
-        baseColor: Colors.grey[300]!,
-        highlightColor: Colors.grey[100]!,
-        child: Container(
-          decoration: BoxDecoration(
-
-            borderRadius: BorderRadius.circular(20),
+          // All stores
+          if (otherStores.isNotEmpty) ...[
+            SliverToBoxAdapter(
+              child: ZingSectionHeader(
+                title: 'All Stores',
+                icon: Icons.storefront_rounded,
+                iconColor: cs.secondary,
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: SizedBox(
+                height: 260,
+                child: _buildStoresList(otherStores, user),
+              ),
+            ),
+          ],
+          // Advertisements
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(top: ZingSpacing.xl, bottom: ZingSpacing.md),
+              child: _buildAdvertisementSection(screenSize, theme),
+            ),
           ),
-        ),
+          const SliverToBoxAdapter(child: SizedBox(height: 24)),
+        ],
       ),
     );
   }
+
+  Widget _buildOfferCarousel(Size screenSize, ThemeData theme) {
+    final cs = theme.colorScheme;
+
+    return Consumer<OfferProvider>(
+      builder: (context, offerProvider, _) {
+        if (offerProvider.isLoading) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: ZingSpacing.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ZingShimmer.box(width: 150, height: 24),
+                const SizedBox(height: ZingSpacing.md),
+                ZingShimmer.box(height: screenSize.height * 0.2, borderRadius: 20),
+              ],
+            ),
+          );
+        }
+
+        if (offerProvider.offers.isEmpty) return const SizedBox.shrink();
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: ZingSpacing.lg),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ZingSectionHeader(
+                title: 'Special Offers',
+                icon: Icons.local_offer_rounded,
+                iconColor: cs.secondary,
+                padding: EdgeInsets.zero,
+              ),
+              const SizedBox(height: ZingSpacing.md),
+              RepaintBoundary(
+                child: CarouselSlider.builder(
+                  itemCount: offerProvider.offers.length,
+                  itemBuilder: (context, index, _) {
+                    final offer = offerProvider.offers[index];
+                    return Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: ZingShadows.soft,
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: Image.network(
+                                offer.imageUrl,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Container(
+                                  color: cs.surfaceContainerHighest,
+                                  child: Icon(Icons.error_outline, color: cs.error, size: 32),
+                                ),
+                              ),
+                            ),
+                            Positioned.fill(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [Colors.transparent, Colors.black.withOpacity(0.6)],
+                                    stops: const [0.6, 1.0],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Positioned(
+                              top: 16, left: 16,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: cs.secondary,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  'SPECIAL OFFER',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: Colors.white, fontWeight: FontWeight.w700, letterSpacing: 0.5),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                  options: CarouselOptions(
+                    height: screenSize.height * 0.2,
+                    viewportFraction: 1.0,
+                    autoPlay: true,
+                    autoPlayInterval: const Duration(seconds: 5),
+                    autoPlayAnimationDuration: const Duration(milliseconds: 800),
+                    autoPlayCurve: Curves.fastOutSlowIn,
+                    pauseAutoPlayOnTouch: true,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCategorySelector(ThemeData theme) {
+    final cs = theme.colorScheme;
+    return SizedBox(
+      height: 110,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        itemCount: _categories.length,
+        itemBuilder: (context, index) {
+          final category = _categories[index];
+          final isSelected = _selectedCategory == category.name;
+
+          return GestureDetector(
+            onTap: () {
+              HapticFeedback.lightImpact();
+              setState(() => _selectedCategory = isSelected ? null : category.name);
+            },
+            child: Container(
+              width: 85,
+              margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 70,
+                    height: 70,
+                    decoration: BoxDecoration(
+                      color: isSelected ? category.color : category.bgColor,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: isSelected
+                          ? [BoxShadow(color: category.color.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4))]
+                          : null,
+                    ),
+                    child: Center(
+                      child: FaIcon(category.icon, color: isSelected ? Colors.white : category.color, size: 26),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    category.name,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                      color: isSelected ? category.color : cs.onSurface,
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  if (isSelected)
+                    Container(
+                      width: 16, height: 2,
+                      decoration: BoxDecoration(
+                        color: category.color,
+                        borderRadius: BorderRadius.circular(1),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildStoresList(List<Store> stores, CustomUser? user) {
+    return ListView.builder(
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: stores.length,
+      itemBuilder: (context, index) {
+        final store = stores[index];
+        final distance = _calculateDistance(store.location.latitude, store.location.longitude);
+        final rating = _storeRatings[store.id] ?? 0.0;
+
+        return ZingStoreCard(
+          store: store,
+          user: user,
+          distance: distance,
+          rating: rating,
+        );
+      },
+    );
+  }
+
+  Widget _buildAdvertisementSection(Size screenSize, ThemeData theme) {
+    final cs = theme.colorScheme;
+
+    return Consumer<AdvertisementProvider>(
+      builder: (context, adProvider, _) {
+        if (adProvider.isLoading) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: ZingSpacing.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ZingShimmer.box(width: 150, height: 24),
+                const SizedBox(height: ZingSpacing.md),
+                ZingShimmer.box(height: screenSize.height * 0.15, borderRadius: 20),
+              ],
+            ),
+          );
+        }
+
+        if (adProvider.advertisements.isEmpty) return const SizedBox.shrink();
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: ZingSpacing.lg),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ZingSectionHeader(
+                title: 'Featured Ads',
+                icon: Icons.campaign_rounded,
+                iconColor: cs.tertiary,
+                padding: EdgeInsets.zero,
+              ),
+              const SizedBox(height: ZingSpacing.md),
+              RepaintBoundary(
+                child: CarouselSlider.builder(
+                  itemCount: adProvider.advertisements.length,
+                  options: CarouselOptions(
+                    height: screenSize.height * 0.15,
+                    viewportFraction: 1.0,
+                    autoPlay: true,
+                    autoPlayInterval: const Duration(seconds: 7),
+                    autoPlayAnimationDuration: const Duration(milliseconds: 800),
+                    enableInfiniteScroll: true,
+                  ),
+                  itemBuilder: (context, index, _) {
+                    final ad = adProvider.advertisements[index];
+                    return Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: ZingShadows.soft,
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: Image.network(
+                          ad.imageUrl,
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          errorBuilder: (_, __, ___) => Container(
+                            color: cs.surfaceContainerHighest,
+                            child: Icon(Icons.error_outline, color: cs.error, size: 32),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _CategoryItem {
+  final String name;
+  final IconData icon;
+  final Color color;
+  final Color bgColor;
+  const _CategoryItem(this.name, this.icon, this.color, this.bgColor);
 }

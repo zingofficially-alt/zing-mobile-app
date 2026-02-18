@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:animate_do/animate_do.dart';
+import 'package:flutter/services.dart';
+import 'dart:ui';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -7,80 +10,259 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:zing/Modal/CoustomUser.dart';
 import 'package:zing/Service/CoustomUserProvider.dart';
-
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:zing/Service/ThemeProvider.dart';
 
 class FirebaseLoginScreen extends StatefulWidget {
+  const FirebaseLoginScreen({Key? key}) : super(key: key);
+
   @override
   _FirebaseLoginScreenState createState() => _FirebaseLoginScreenState();
 }
 
-class _FirebaseLoginScreenState extends State<FirebaseLoginScreen> {
+class _FirebaseLoginScreenState extends State<FirebaseLoginScreen>
+    with SingleTickerProviderStateMixin {
   bool isPhoneSelected = false;
-  bool isTermsAccepted = false; // To track if terms are accepted
+  bool isTermsAccepted = false;
   final TextEditingController phoneController = TextEditingController(text: '+94 ');
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final _formKey = GlobalKey<FormState>();
   bool isLoading = false;
+  bool isPasswordVisible = false;
   String? _verificationId;
+  String? _errorMessage;
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+  late Animation<Offset> _slideAnimation;
 
-  // URL of Terms and Conditions
-  final String termsUrl = "https://mfmrifath.github.io/Zing-Terms-and-Conditions/"; // Replace with your actual Terms URL
+  Timer? _resendTimer;
+  int _resendCountdown = 0;
+  bool _canResend = true;
+  int _otpRetryCount = 0;
+  final int _maxOtpRetries = 3;
+
+  final String termsUrl = "https://mfmrifath.github.io/Zing-Terms-and-Conditions/";
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _animationController,
+        curve: Curves.easeOut,
+      ),
+    );
+
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.1),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(
+        parent: _animationController,
+        curve: Curves.easeOutCubic,
+      ),
+    );
+
+    _animationController.forward();
+
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _resendTimer?.cancel();
+    _animationController.dispose();
+    phoneController.dispose();
+    emailController.dispose();
+    passwordController.dispose();
+    super.dispose();
+  }
+
+  void _startResendCountdown() {
+    _resendTimer?.cancel();
+    setState(() {
+      _resendCountdown = 60;
+      _canResend = false;
+    });
+
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      if (_resendCountdown > 0) {
+        setState(() => _resendCountdown--);
+      } else {
+        setState(() => _canResend = true);
+        timer.cancel();
+      }
+    });
+  }
 
   Future<void> _launchTermsUrl() async {
-    if (await canLaunch(termsUrl)) {
-      await launch(termsUrl);
+    final Uri url = Uri.parse(termsUrl);
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url);
     } else {
-      _showSnackBar("Unable to open Terms and Conditions URL.", isError: true);
+      if (mounted) {
+        _showSnackBar("Unable to open Terms and Conditions URL.", isError: true);
+      }
     }
   }
 
-  // Show Terms Dialog
   void _showTermsDialog() {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Text("Terms and Conditions"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              "Please read and accept our Terms and Conditions before proceeding.",
-              style: theme.textTheme.bodyMedium,
+      builder: (context) {
+        final dialogTheme = Theme.of(context);
+        final dialogCs = dialogTheme.colorScheme;
+
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+          child: Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
             ),
-            SizedBox(height: 10),
-            GestureDetector(
-              onTap: _launchTermsUrl,
-              child: Text(
-                "View Terms and Conditions",
-                style: TextStyle(
-                  color: theme.primaryColor,
-                  fontWeight: FontWeight.bold,
-                  decoration: TextDecoration.underline,
-                ),
+            elevation: 5,
+            backgroundColor: dialogCs.surface,
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.library_books_rounded,
+                        color: dialogCs.primary,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        "Terms and Conditions",
+                        style: dialogTheme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: dialogCs.onSurface,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    "Please read and accept our Terms and Conditions before proceeding with Zing services.",
+                    style: dialogTheme.textTheme.bodyMedium?.copyWith(
+                      color: dialogCs.onSurface,
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  GestureDetector(
+                    onTap: _launchTermsUrl,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 12,
+                        horizontal: 16,
+                      ),
+                      decoration: BoxDecoration(
+                        color: dialogCs.primary.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.open_in_new_rounded,
+                            color: dialogCs.primary,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            "View Full Terms",
+                            style: dialogTheme.textTheme.labelLarge?.copyWith(
+                              color: dialogCs.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: Text(
+                          "Decline",
+                          style: dialogTheme.textTheme.labelLarge?.copyWith(
+                            color: dialogCs.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      ElevatedButton(
+                        onPressed: () {
+                          setState(() {
+                            isTermsAccepted = true;
+                          });
+                          Navigator.pop(context);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: dialogCs.primary,
+                          foregroundColor: dialogCs.onPrimary,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
+                          ),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: Text(
+                          "Accept",
+                          style: dialogTheme.textTheme.labelLarge?.copyWith(
+                            color: dialogCs.onPrimary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text("Cancel", style: theme.textTheme.bodyLarge),
           ),
-          ElevatedButton(
-            onPressed: () {
-              setState(() {
-                isTermsAccepted = true;
-              });
-              Navigator.pop(context);
-            },
-            child: Text("Accept"),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -90,338 +272,1217 @@ class _FirebaseLoginScreenState extends State<FirebaseLoginScreen> {
       return;
     }
 
-    if (isPhoneSelected) {
-      _loginWithPhoneNumber();
-    } else {
-      _loginWithEmail();
-    }
-  }
+    if (_formKey.currentState?.validate() ?? false) {
+      setState(() {
+        _errorMessage = null;
+      });
 
-  Future<void> _googleSignIn() async {
-    final userProvider = Provider.of<CustomUserProvider>(context, listen: false);
-
-    try {
-      GoogleSignIn googleSignIn = GoogleSignIn();
-      GoogleSignInAccount? account = await googleSignIn.signIn();
-      if (account != null) {
-        GoogleSignInAuthentication googleAuth = await account.authentication;
-        AuthCredential credential = GoogleAuthProvider.credential(
-          accessToken: googleAuth.accessToken,
-          idToken: googleAuth.idToken,
-        );
-
-        UserCredential userCredential = await _auth.signInWithCredential(credential);
-
-        if (userCredential.additionalUserInfo?.isNewUser ?? false) {
-          CustomUser newUser = CustomUser(
-            id: userCredential.user!.uid,
-            name: userCredential.user!.displayName ?? 'Google User',
-            email: userCredential.user!.email ?? '',
-            phoneNumber: userCredential.user!.phoneNumber ?? '',
-            profileImageUrl: userCredential.user!.photoURL ?? '',
-          );
-          await userProvider.saveUserDetails(newUser);
-        }
-
-        _showSnackBar("Google Sign-In Successful!");
-        Navigator.pushNamed(context, '/home');
+      if (isPhoneSelected) {
+        _loginWithPhoneNumber();
+      } else {
+        _loginWithEmail();
       }
-    } catch (e) {
-      _showSnackBar(e.toString(), isError: true);
     }
   }
 
   Future<void> _loginWithEmail() async {
-    if (_formKey.currentState?.validate() ?? false) {
-      setState(() => isLoading = true);
-      try {
-        await _auth.signInWithEmailAndPassword(
-          email: emailController.text.trim(),
-          password: passwordController.text.trim(),
-        );
-        _showSnackBar("Login Successful!");
-        Navigator.pushNamed(context, '/home');
-      } on FirebaseAuthException catch (e) {
-        _showSnackBar(e.message ?? "Login failed.", isError: true);
-      } finally {
-        setState(() => isLoading = false);
+    setState(() {
+      isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await _auth.signInWithEmailAndPassword(
+        email: emailController.text.trim(),
+        password: passwordController.text.trim(),
+      );
+
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/home');
+      }
+    } on FirebaseAuthException catch (e) {
+      if (mounted) {
+        setState(() {
+          switch (e.code) {
+            case 'user-not-found':
+              _errorMessage = "No account found with this email. Please check or sign up.";
+              break;
+            case 'wrong-password':
+              _errorMessage = "Incorrect password. Please try again or reset your password.";
+              break;
+            case 'invalid-email':
+              _errorMessage = "Invalid email format. Please enter a valid email address.";
+              break;
+            case 'user-disabled':
+              _errorMessage = "This account has been disabled. Please contact support.";
+              break;
+            case 'too-many-requests':
+              _errorMessage = "Too many failed attempts. Please try again later or reset your password.";
+              break;
+            case 'network-request-failed':
+              _errorMessage = "Network error. Please check your internet connection and try again.";
+              break;
+            case 'invalid-credential':
+              _errorMessage = "Invalid email or password. Please check your credentials.";
+              break;
+            case 'operation-not-allowed':
+              _errorMessage = "Email/password sign-in is disabled. Please contact support.";
+              break;
+            case 'email-already-in-use':
+              _errorMessage = "This email is already registered. Please sign in instead.";
+              break;
+            default:
+              _errorMessage = e.message ?? "Login failed. Please check your credentials and try again.";
+          }
+        });
+        HapticFeedback.heavyImpact();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = "An unexpected error occurred. Please check your connection and try again.";
+        });
+        HapticFeedback.heavyImpact();
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
       }
     }
   }
 
   Future<void> _loginWithPhoneNumber() async {
-    final theme = Theme.of(context);
+    print("\n🔵 ========== PHONE LOGIN STARTED ==========");
+    print("🔵 Phone number from controller: '${phoneController.text}'");
 
-    if (phoneController.text.isEmpty || !phoneController.text.startsWith('+94')) {
-      _showSnackBar("Enter a valid phone number starting with +94", isError: true);
+    if (_otpRetryCount >= _maxOtpRetries) {
+      print("❌ Max OTP retry attempts reached: $_otpRetryCount/$_maxOtpRetries");
+      setState(() {
+        _errorMessage = "Maximum attempts reached. Please try again later.";
+      });
       return;
     }
 
-    setState(() => isLoading = true);
+    String phoneNumber = phoneController.text.trim();
+    print("🔵 Trimmed phone number: '$phoneNumber'");
+
+    if (!phoneNumber.startsWith('+94')) {
+      print("❌ Phone number validation failed: doesn't start with +94");
+      setState(() {
+        _errorMessage = "Phone number must start with +94";
+      });
+      return;
+    }
+
+    String numberWithoutCode = phoneNumber.substring(3).replaceAll(RegExp(r'\D'), '');
+    print("🔵 Number without country code: '$numberWithoutCode' (length: ${numberWithoutCode.length})");
+
+    if (numberWithoutCode.length != 9 || !numberWithoutCode.startsWith('7')) {
+      print("❌ Phone number validation failed: invalid Sri Lankan format");
+      setState(() {
+        _errorMessage = "Please enter a valid Sri Lankan mobile number";
+      });
+      return;
+    }
+
+    print("✅ Phone number validation passed: $phoneNumber");
+    setState(() {
+      isLoading = true;
+      _errorMessage = null;
+    });
+
+    print("🔵 Starting Firebase phone verification...");
     try {
       await _auth.verifyPhoneNumber(
-        phoneNumber: phoneController.text.trim(),
+        phoneNumber: phoneNumber,
         verificationCompleted: (PhoneAuthCredential credential) async {
-          await _auth.signInWithCredential(credential);
-          _showSnackBar("Phone Login Successful!");
-          Navigator.pushNamed(context, '/home');
+          print("\n✅ ========== VERIFICATION COMPLETED (AUTO) ==========");
+          print("✅ Auto-verification successful, signing in...");
+
+          UserCredential userCredential = await _auth.signInWithCredential(credential);
+          print("✅ User signed in: ${userCredential.user?.uid}");
+
+          if (userCredential.additionalUserInfo?.isNewUser ?? false) {
+            print("🔵 New user detected, saving to Firestore...");
+            await _saveUserToFirestore(userCredential.user!);
+          }
+
+          print("✅ Phone verification successful, navigating to home");
+
+          if (mounted) {
+            Navigator.pushReplacementNamed(context, '/home');
+          }
         },
         verificationFailed: (FirebaseAuthException e) {
-          _showSnackBar(e.message ?? "Phone login failed.", isError: true);
+          print("\n❌ ========== VERIFICATION FAILED ==========");
+          print("❌ Error code: ${e.code}");
+          print("❌ Error message: ${e.message}");
+          print("❌ Error details: $e");
+
+          if (mounted) {
+            setState(() {
+              isLoading = false;
+              switch (e.code) {
+                case 'invalid-phone-number':
+                  _errorMessage = "Invalid phone number format. Please check and try again.";
+                  print("❌ Invalid phone number format");
+                  break;
+                case 'too-many-requests':
+                  _errorMessage = "Too many verification attempts. Please try again in an hour.";
+                  print("❌ Too many requests");
+                  break;
+                case 'quota-exceeded':
+                  _errorMessage = "SMS quota exceeded. Please try again later or use email login.";
+                  print("❌ SMS quota exceeded");
+                  break;
+                case 'app-not-authorized':
+                  _errorMessage = "Phone authentication is not enabled. Please contact support.";
+                  print("❌ App not authorized for phone auth");
+                  break;
+                case 'network-request-failed':
+                  _errorMessage = "Network error. Please check your connection and try again.";
+                  print("❌ Network request failed");
+                  break;
+                default:
+                  _errorMessage = e.message ?? "Phone verification failed. Please try again.";
+                  print("❌ Other error: ${e.code}");
+              }
+            });
+            HapticFeedback.heavyImpact();
+          }
         },
         codeSent: (String verificationId, int? resendToken) {
-          setState(() {
-            _verificationId = verificationId;
-          });
-          _showOTPDialog();
+          print("\n✅ ========== CODE SENT ==========");
+          print("✅ Verification ID: $verificationId");
+          print("✅ Resend token: $resendToken");
+          print("✅ OTP retry count: $_otpRetryCount");
+
+          if (mounted) {
+            setState(() {
+              isLoading = false;
+              _verificationId = verificationId;
+              _otpRetryCount++;
+            });
+            _startResendCountdown();
+            _showOTPDialog();
+            print("✅ OTP dialog shown");
+          }
         },
         codeAutoRetrievalTimeout: (String verificationId) {
+          print("\n⏱️ ========== AUTO RETRIEVAL TIMEOUT ==========");
+          print("⏱️ Verification ID: $verificationId");
           _verificationId = verificationId;
         },
+        timeout: const Duration(seconds: 60),
       );
+      print("🔵 verifyPhoneNumber() call completed");
     } catch (e) {
-      _showSnackBar("Error: $e", isError: true);
-    } finally {
-      setState(() => isLoading = false);
+      print("\n❌ ========== EXCEPTION IN PHONE VERIFICATION ==========");
+      print("❌ Exception type: ${e.runtimeType}");
+      print("❌ Exception details: $e");
+      print("❌ Stack trace: ${StackTrace.current}");
+
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+          _errorMessage = "Failed to send verification code: ${e.toString()}. Please try again.";
+        });
+        HapticFeedback.heavyImpact();
+      }
     }
+    print("🔵 ========== PHONE LOGIN METHOD ENDED ==========\n");
   }
-// OTP Dialog for Phone Number Login
+
   void _showOTPDialog() {
-    String otpCode = "";
+    List<TextEditingController> controllers = List.generate(
+      6,
+          (index) => TextEditingController(),
+    );
+
+    List<FocusNode> focusNodes = List.generate(
+      6,
+          (index) => FocusNode(),
+    );
+
+    for (int i = 0; i < 6; i++) {
+      controllers[i].addListener(() {
+        String otp = controllers.map((c) => c.text).join();
+        if (otp.length == 6) {
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (mounted) {
+              Navigator.of(context).pop();
+              _verifyOTPCodeFromDialog(otp, controllers, focusNodes);
+            }
+          });
+        }
+      });
+    }
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text("Enter OTP"),
-        content: TextField(
-          onChanged: (value) {
-            otpCode = value;
-          },
-          keyboardType: TextInputType.number,
-          decoration: InputDecoration(
-            hintText: 'Enter OTP',
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              try {
-                if (_verificationId != null) {
-                  PhoneAuthCredential credential = PhoneAuthProvider.credential(
-                    verificationId: _verificationId!,
-                    smsCode: otpCode,
-                  );
-                  await _auth.signInWithCredential(credential);
-                  _showSnackBar("Phone Login Successful!");
-                  Navigator.pushNamed(context, '/home'); // Replace '/home' with your home route
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final dialogTheme = Theme.of(context);
+          final dialogCs = dialogTheme.colorScheme;
+          bool isVerifying = false;
+          String? otpError;
+
+          void verifyOTP() async {
+            print("\n🔵 ========== OTP DIALOG VERIFICATION STARTED ==========");
+
+            setDialogState(() {
+              isVerifying = true;
+              otpError = null;
+            });
+
+            String otp = controllers.map((controller) => controller.text).join();
+            print("🔵 OTP from dialog: '$otp' (length: ${otp.length})");
+
+            if (otp.length != 6) {
+              print("❌ OTP validation failed: length is ${otp.length}, expected 6");
+              setDialogState(() {
+                isVerifying = false;
+                otpError = "Please enter all 6 digits";
+              });
+              return;
+            }
+
+            print("✅ OTP validation passed");
+            print("🔵 Verification ID: '$_verificationId'");
+
+            try {
+              if (_verificationId != null) {
+                print("✅ Creating phone auth credential with OTP...");
+                PhoneAuthCredential credential = PhoneAuthProvider.credential(
+                  verificationId: _verificationId!,
+                  smsCode: otp,
+                );
+
+                print("🔵 Signing in with credential from OTP dialog...");
+                UserCredential userCredential = await _auth.signInWithCredential(credential);
+                print("✅ Sign in successful from OTP dialog! User ID: ${userCredential.user?.uid}");
+
+                if (userCredential.additionalUserInfo?.isNewUser ?? false) {
+                  print("🔵 New user from OTP dialog, saving to Firestore...");
+                  await _saveUserToFirestore(userCredential.user!);
                 }
-              } catch (e) {
-                _showSnackBar("Invalid OTP", isError: true);
+
+                print("✅ Closing OTP dialog and navigating to home");
+
+                if (mounted) {
+                  Navigator.pop(context); // Close dialog
+                  Navigator.pushReplacementNamed(context, '/home');
+                }
+              } else {
+                print("❌ Verification ID is null in OTP dialog!");
+                setDialogState(() {
+                  isVerifying = false;
+                  otpError = "Verification session expired. Please try again.";
+                });
               }
-            },
-            child: Text("Submit"),
-          ),
-        ],
-      ),
-    );
-  }
-  void _showSnackBar(String message, {bool isError = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: isError ? Colors.red : Theme.of(context).primaryColor,
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 3),
-      ),
-    );
-  }
+            } on FirebaseAuthException catch (e) {
+              print("\n❌ ========== OTP DIALOG FIREBASE ERROR ==========");
+              print("❌ Firebase error code: ${e.code}");
+              print("❌ Firebase error message: ${e.message}");
+              print("❌ Full error: $e");
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+              setDialogState(() {
+                isVerifying = false;
+                switch (e.code) {
+                  case 'invalid-verification-code':
+                    otpError = "Invalid code. Please check and try again.";
+                    print("❌ Invalid verification code");
+                    for (var controller in controllers) {
+                      controller.clear();
+                    }
+                    focusNodes[0].requestFocus();
+                    break;
+                  case 'session-expired':
+                    otpError = "Session expired. Please request a new code.";
+                    print("❌ Session expired");
+                    break;
+                  case 'code-expired':
+                    otpError = "Code expired. Please request a new code.";
+                    print("❌ Code expired");
+                    break;
+                  default:
+                    otpError = "Verification failed: ${e.message ?? e.code}";
+                    print("❌ Other error: ${e.code}");
+                }
+              });
+            } catch (e) {
+              print("\n❌ ========== OTP DIALOG EXCEPTION ==========");
+              print("❌ Exception type: ${e.runtimeType}");
+              print("❌ Exception details: $e");
 
-    return SafeArea(
-      child: Scaffold(
-        backgroundColor: theme.scaffoldBackgroundColor,
-        body: SingleChildScrollView(
-          child: Container(
-            height: MediaQuery.of(context).size.height,
-            padding: EdgeInsets.symmetric(horizontal: 20.0, vertical: 40.0),
-            child: Form(
-              key: _formKey,
-              child: Column(
+              setDialogState(() {
+                isVerifying = false;
+                otpError = "Unexpected error: ${e.toString()}";
+              });
+            }
+            print("🔵 ========== OTP DIALOG VERIFICATION ENDED ==========\n");
+          }
+
+          return BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+            child: AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              backgroundColor: dialogCs.surface,
+              title: Row(
                 children: [
-                  Spacer(flex: 1),
-                  // Logo at the top
-                  FadeInDown(
-                    child: Image.asset(
-                      'assets/images/zing.png', // Replace with your logo's asset path
-                      height: 120,
+                  Icon(
+                    Icons.security_rounded,
+                    color: dialogCs.primary,
+                    size: 28,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    "Verification Code",
+                    style: dialogTheme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: dialogCs.onSurface,
                     ),
                   ),
-                  SizedBox(height: 20),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   Text(
-                    "Welcome Back!",
-                    style: theme.textTheme.headlineSmall,
-                    textAlign: TextAlign.center,
+                    "Enter the 6-digit code sent to",
+                    style: dialogTheme.textTheme.bodyMedium?.copyWith(
+                      color: dialogCs.onSurface,
+                    ),
                   ),
-                  SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   Text(
-                    "Login to your account",
-                    style: theme.textTheme.bodyMedium,
-                    textAlign: TextAlign.center,
+                    phoneController.text,
+                    style: dialogTheme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: dialogCs.primary,
+                    ),
                   ),
-                  SizedBox(height: 30),
+                  const SizedBox(height: 24),
                   Row(
-                    children: [
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => setState(() => isPhoneSelected = true),
-                          child: Container(
-                            padding: EdgeInsets.symmetric(vertical: 16),
-                            decoration: BoxDecoration(
-                              color: isPhoneSelected
-                                  ? theme.colorScheme.primary.withOpacity(0.2)
-                                  : Colors.transparent,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Center(
-                              child: Text(
-                                "Phone Number",
-                                style: TextStyle(
-                                  color: isPhoneSelected
-                                      ? theme.colorScheme.onPrimary
-                                      : theme.primaryColor,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: List.generate(
+                      6,
+                          (index) => SizedBox(
+                        width: 40,
+                        child: TextField(
+                          controller: controllers[index],
+                          focusNode: focusNodes[index],
+                          decoration: InputDecoration(
+                            contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                            enabledBorder: UnderlineInputBorder(
+                              borderSide: BorderSide(
+                                color: dialogCs.outline,
+                                width: 2,
                               ),
                             ),
+                            focusedBorder: UnderlineInputBorder(
+                              borderSide: BorderSide(
+                                color: dialogCs.primary,
+                                width: 2,
+                              ),
+                            ),
+                            counterText: '',
+                          ),
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          maxLength: 1,
+                          onChanged: (value) {
+                            if (value.isNotEmpty && index < 5) {
+                              focusNodes[index + 1].requestFocus();
+                            } else if (value.isEmpty && index > 0) {
+                              focusNodes[index - 1].requestFocus();
+                            }
+                          },
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
+                          style: dialogTheme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
                       ),
-                      SizedBox(width: 10),
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => setState(() => isPhoneSelected = false),
-                          child: Container(
-                            padding: EdgeInsets.symmetric(vertical: 16),
-                            decoration: BoxDecoration(
-                              color: !isPhoneSelected
-                                  ? theme.colorScheme.primary.withOpacity(0.2)
-                                  : Colors.transparent,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Center(
-                              child: Text(
-                                "Email",
-                                style: TextStyle(
-                                  color: !isPhoneSelected
-                                      ? theme.colorScheme.onPrimary
-                                      : theme.primaryColor,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
+                    ),
+                  ),
+                  if (otpError != null) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      otpError!,
+                      style: dialogTheme.textTheme.bodySmall?.copyWith(
+                        color: dialogCs.error,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        "Didn't receive the code? ",
+                        style: dialogTheme.textTheme.bodySmall?.copyWith(
+                          color: dialogCs.onSurfaceVariant,
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: _canResend
+                            ? () {
+                          Navigator.pop(context);
+                          for (var controller in controllers) {
+                            controller.clear();
+                          }
+                          _loginWithPhoneNumber();
+                        }
+                            : null,
+                        child: Text(
+                          _canResend ? "Resend" : "Resend in ${_resendCountdown}s",
+                          style: dialogTheme.textTheme.bodySmall?.copyWith(
+                            color: _canResend ? dialogCs.primary : dialogCs.outline,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
                       ),
                     ],
                   ),
-                  SizedBox(height: 20),
-                  AnimatedSwitcher(
-                    duration: Duration(milliseconds: 300),
-                    child: isPhoneSelected
-                        ? TextFormField(
-                      key: ValueKey("phone"),
-                      controller: phoneController,
-                      decoration: InputDecoration(
-                        prefixIcon: Icon(Icons.phone, color: theme.primaryColor),
-                        labelText: "Phone Number",
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      validator: (value) {
-                        if (value == null || !value.startsWith('+94')) {
-                          return 'Phone number must start with +94';
-                        }
-                        return null;
-                      },
-                    )
-                        : Column(
-                      key: ValueKey("email"),
-                      children: [
-                        TextFormField(
-                          controller: emailController,
-                          decoration: InputDecoration(
-                            prefixIcon: Icon(Icons.email, color: theme.primaryColor),
-                            labelText: "Email",
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          validator: (value) {
-                            if (value == null || !value.contains('@')) {
-                              return 'Enter a valid email';
-                            }
-                            return null;
-                          },
-                        ),
-                        SizedBox(height: 16),
-                        TextFormField(
-                          controller: passwordController,
-                          obscureText: true,
-                          decoration: InputDecoration(
-                            prefixIcon: Icon(Icons.lock, color: theme.primaryColor),
-                            labelText: "Password",
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          validator: (value) {
-                            if (value == null || value.length < 6) {
-                              return 'Enter a valid password';
-                            }
-                            return null;
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                  SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: _checkTermsAndLogin,
-                    child: isLoading
-                        ? CircularProgressIndicator(color: theme.colorScheme.onPrimary)
-                        : Text(isPhoneSelected ? "Request OTP" : "Login"),
-                  ),
-                  SizedBox(height: 20),
-                  ElevatedButton.icon(
-                    onPressed: _googleSignIn,
-                    icon: FaIcon(FontAwesomeIcons.google, color: Colors.red),
-                    label: Text("Login with Google"),
-                  ),
-                  Spacer(flex: 1),
-                  // Create account button at the bottom
-                  TextButton(
-                    onPressed: () {
-                      Navigator.pushNamed(context, '/createAccount');
-                    },
-                    child: Text(
-                      "Don't have an account? Create one",
-                      style: TextStyle(
-                        color: theme.primaryColor,
-                        fontWeight: FontWeight.bold,
+                  if (_otpRetryCount > 0) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      "Attempts: $_otpRetryCount / $_maxOtpRetries",
+                      style: dialogTheme.textTheme.bodySmall?.copyWith(
+                        color: dialogCs.onSurfaceVariant,
                       ),
                     ),
-                  ),
-                  Spacer(flex: 1),
+                  ],
                 ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: Text(
+                    "Cancel",
+                    style: dialogTheme.textTheme.labelLarge?.copyWith(
+                      color: dialogCs.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: isVerifying ? null : verifyOTP,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: dialogCs.primary,
+                    foregroundColor: dialogCs.onPrimary,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: isVerifying
+                      ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      color: dialogCs.onPrimary,
+                      strokeWidth: 2,
+                    ),
+                  )
+                      : Text(
+                    "Verify",
+                    style: dialogTheme.textTheme.labelLarge?.copyWith(
+                      color: dialogCs.onPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _verifyOTPCodeFromDialog(
+      String otp,
+      List<TextEditingController> controllers,
+      List<FocusNode> focusNodes,
+      ) async {
+    print("\n🔵 ========== AUTO-SUBMIT OTP VERIFICATION ==========");
+
+    try {
+      if (_verificationId != null) {
+        PhoneAuthCredential credential = PhoneAuthProvider.credential(
+          verificationId: _verificationId!,
+          smsCode: otp,
+        );
+
+        UserCredential userCredential = await _auth.signInWithCredential(credential);
+
+        if (userCredential.additionalUserInfo?.isNewUser ?? false) {
+          await _saveUserToFirestore(userCredential.user!);
+        }
+
+        if (mounted) {
+          Navigator.pushReplacementNamed(context, '/home');
+        }
+      }
+    } catch (e) {
+      print("❌ Auto-submit verification failed: $e");
+    }
+  }
+
+  void _showSnackBar(String message, {bool isError = false}) {
+    if (!mounted) return;
+
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(
+              isError ? Icons.error_outline : Icons.check_circle_outline,
+              color: cs.onPrimary,
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: isError ? cs.error : cs.primary,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+        margin: const EdgeInsets.all(10),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  Future<void> _saveUserToFirestore(User user) async {
+    try {
+      final userData = {
+        'uid': user.uid,
+        'name': user.displayName ?? 'User',
+        'email': user.email ?? '',
+        'phone': user.phoneNumber ?? phoneController.text.trim(),
+        'role': 'User',
+        'profileImageUrl': user.photoURL ?? '',
+        'emailVerified': user.emailVerified,
+        'preferences': {
+          'darkMode': false,
+          'notifications': true,
+          'language': 'en',
+        },
+        'metadata': {
+          'signUpMethod': 'phone',
+          'platform': 'android',
+        },
+        'createdAt': FieldValue.serverTimestamp(),
+        'lastLoginAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .set(userData, SetOptions(merge: true));
+
+      print("✅ User data saved to Firestore successfully for UID: ${user.uid}");
+    } catch (e) {
+      print("❌ Failed to save user data to Firestore: $e");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Scaffold(
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    cs.primary.withOpacity(0.08),
+                    cs.surface,
+                    cs.surface,
+                    cs.primary.withOpacity(0.04),
+                  ],
+                ),
               ),
             ),
           ),
+
+          Positioned(
+            top: -100,
+            right: -100,
+            child: Opacity(
+              opacity: 0.1,
+              child: Container(
+                width: 300,
+                height: 300,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: cs.primary,
+                ),
+              ),
+            ),
+          ),
+
+          Positioned(
+            bottom: -80,
+            left: -80,
+            child: Opacity(
+              opacity: 0.1,
+              child: Container(
+                width: 200,
+                height: 200,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: cs.primary,
+                ),
+              ),
+            ),
+          ),
+
+          SafeArea(
+            child: FadeTransition(
+              opacity: _fadeAnimation,
+              child: SlideTransition(
+                position: _slideAnimation,
+                child: Center(
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Center(
+                              child: Hero(
+                                tag: 'logo',
+                                child: Image.asset(
+                                  'assets/images/zing.png',
+                                  height: 100,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 32),
+                            Text(
+                              "Welcome Back!",
+                              style: theme.textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: cs.onSurface,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              "Sign in to continue to Zing",
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: cs.onSurfaceVariant,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 40),
+
+                            Container(
+                              decoration: BoxDecoration(
+                                color: cs.surface,
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: ZingShadows.soft,
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(4.0),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: _buildToggleButton(
+                                        icon: Icons.phone_android_rounded,
+                                        label: "Phone",
+                                        isSelected: isPhoneSelected,
+                                        onTap: () => setState(() {
+                                          isPhoneSelected = true;
+                                          _errorMessage = null;
+                                        }),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: _buildToggleButton(
+                                        icon: Icons.email_rounded,
+                                        label: "Email",
+                                        isSelected: !isPhoneSelected,
+                                        onTap: () => setState(() {
+                                          isPhoneSelected = false;
+                                          _errorMessage = null;
+                                        }),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 32),
+
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 300),
+                              transitionBuilder: (Widget child, Animation<double> animation) {
+                                return FadeTransition(
+                                  opacity: animation,
+                                  child: SlideTransition(
+                                    position: Tween<Offset>(
+                                      begin: const Offset(0.0, 0.1),
+                                      end: Offset.zero,
+                                    ).animate(animation),
+                                    child: child,
+                                  ),
+                                );
+                              },
+                              child: isPhoneSelected
+                                  ? _buildPhoneInputField()
+                                  : _buildEmailPasswordFields(),
+                            ),
+
+                            if (_errorMessage != null) ...[
+                              const SizedBox(height: 16),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: cs.error.withOpacity(0.08),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: cs.error.withOpacity(0.3),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.error_outline,
+                                      color: cs.error,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        _errorMessage!,
+                                        style: theme.textTheme.bodySmall?.copyWith(
+                                          color: cs.error,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+
+                            const SizedBox(height: 32),
+
+                            _buildPrimaryButton(
+                              onPressed: _checkTermsAndLogin,
+                              text: isPhoneSelected ? "Send Verification Code" : "Sign In",
+                              isLoading: isLoading,
+                            ),
+
+                            const SizedBox(height: 24),
+
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Container(
+                                    height: 1,
+                                    color: cs.outline,
+                                  ),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                                  child: Text(
+                                    "Or continue with",
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: cs.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Container(
+                                    height: 1,
+                                    color: cs.outline,
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                            const SizedBox(height: 32),
+
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  "Don't have an account? ",
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: cs.onSurfaceVariant,
+                                  ),
+                                ),
+                                GestureDetector(
+                                  onTap: () {
+                                    Navigator.pushNamed(context, '/createAccount');
+                                  },
+                                  child: Text(
+                                    "Sign Up",
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: cs.primary,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                            const SizedBox(height: 24),
+
+                            GestureDetector(
+                              onTap: _showTermsDialog,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    isTermsAccepted ? Icons.check_circle : Icons.check_circle_outline,
+                                    color: isTermsAccepted ? cs.primary : cs.outline,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    "I agree to the Terms and Conditions",
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: isTermsAccepted ? cs.primary : cs.onSurfaceVariant,
+                                      fontWeight: isTermsAccepted ? FontWeight.w500 : FontWeight.normal,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+
+                            const SizedBox(height: 24),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToggleButton({
+    required IconData icon,
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? cs.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              color: isSelected ? cs.onPrimary : cs.onSurfaceVariant,
+              size: 20,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: isSelected ? cs.onPrimary : cs.onSurfaceVariant,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPhoneInputField() {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Container(
+      key: const ValueKey("phone"),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: ZingShadows.soft,
+      ),
+      child: TextFormField(
+        controller: phoneController,
+        decoration: InputDecoration(
+          contentPadding: const EdgeInsets.all(20),
+          hintText: "Phone Number",
+          hintStyle: theme.textTheme.bodyMedium?.copyWith(
+            color: cs.outline,
+            fontSize: 16,
+          ),
+          prefixIcon: Container(
+            padding: const EdgeInsets.all(16),
+            child: Icon(
+              Icons.phone_android_rounded,
+              color: cs.primary,
+              size: 22,
+            ),
+          ),
+          border: InputBorder.none,
+        ),
+        keyboardType: TextInputType.phone,
+        style: theme.textTheme.titleMedium?.copyWith(
+          fontSize: 16,
+          fontWeight: FontWeight.w500,
+        ),
+        validator: (value) {
+          if (value == null || value.trim().isEmpty) {
+            return "Phone number is required";
+          }
+          if (!value.startsWith('+94')) {
+            return "Phone number must start with +94";
+          }
+          return null;
+        },
+      ),
+    );
+  }
+
+  Widget _buildEmailPasswordFields() {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Column(
+      key: const ValueKey("email"),
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            color: cs.surface,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: ZingShadows.soft,
+          ),
+          child: TextFormField(
+            controller: emailController,
+            decoration: InputDecoration(
+              contentPadding: const EdgeInsets.all(20),
+              hintText: "Email Address",
+              hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                color: cs.outline,
+                fontSize: 16,
+              ),
+              prefixIcon: Container(
+                padding: const EdgeInsets.all(16),
+                child: Icon(
+                  Icons.email_rounded,
+                  color: cs.primary,
+                  size: 22,
+                ),
+              ),
+              border: InputBorder.none,
+            ),
+            keyboardType: TextInputType.emailAddress,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
+            validator: (value) {
+              if (value == null || value.trim().isEmpty) {
+                return "Email is required";
+              }
+              if (!value.contains('@') || !value.contains('.')) {
+                return "Please enter a valid email address";
+              }
+              return null;
+            },
+          ),
+        ),
+        const SizedBox(height: 16),
+        Container(
+          decoration: BoxDecoration(
+            color: cs.surface,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: ZingShadows.soft,
+          ),
+          child: TextFormField(
+            controller: passwordController,
+            obscureText: !isPasswordVisible,
+            decoration: InputDecoration(
+              contentPadding: const EdgeInsets.all(20),
+              hintText: "Password",
+              hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                color: cs.outline,
+                fontSize: 16,
+              ),
+              prefixIcon: Container(
+                padding: const EdgeInsets.all(16),
+                child: Icon(
+                  Icons.lock_rounded,
+                  color: cs.primary,
+                  size: 22,
+                ),
+              ),
+              suffixIcon: GestureDetector(
+                onTap: () => setState(() {
+                  isPasswordVisible = !isPasswordVisible;
+                }),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  child: Icon(
+                    isPasswordVisible ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                    color: cs.onSurfaceVariant,
+                    size: 22,
+                  ),
+                ),
+              ),
+              border: InputBorder.none,
+            ),
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
+            validator: (value) {
+              if (value == null || value.trim().isEmpty) {
+                return "Password is required";
+              }
+              if (value.length < 6) {
+                return "Password must be at least 6 characters";
+              }
+              return null;
+            },
+          ),
+        ),
+        const SizedBox(height: 16),
+        Align(
+          alignment: Alignment.centerRight,
+          child: GestureDetector(
+            onTap: () {},
+            child: Text(
+              "Forgot Password?",
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: cs.primary,
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPrimaryButton({
+    required VoidCallback onPressed,
+    required String text,
+    bool isLoading = false,
+  }) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Container(
+      height: 56,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: cs.primary.withOpacity(0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+        gradient: LinearGradient(
+          colors: [cs.primary, cs.primary.withOpacity(0.75)],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+      ),
+      child: ElevatedButton(
+        onPressed: isLoading ? null : onPressed,
+        style: ElevatedButton.styleFrom(
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          foregroundColor: cs.onPrimary,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+        child: isLoading
+            ? SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(
+            color: cs.onPrimary,
+            strokeWidth: 2,
+          ),
+        )
+            : Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              text,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.5,
+                color: cs.onPrimary,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(
+              Icons.arrow_forward_rounded,
+              size: 18,
+              color: cs.onPrimary,
+            ),
+          ],
         ),
       ),
     );

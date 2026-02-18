@@ -1,0 +1,2 @@
+/Users/mohammedfareesmohammedrifath/Projects/Untitled/Zing_Updated/ZING/android/app/.cxx/RelWithDebInfo/1d57271f/x86_64/CMakeFiles/edit_cache.dir
+/Users/mohammedfareesmohammedrifath/Projects/Untitled/Zing_Updated/ZING/android/app/.cxx/RelWithDebInfo/1d57271f/x86_64/CMakeFiles/rebuild_cache.dir

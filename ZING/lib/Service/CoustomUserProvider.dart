@@ -19,6 +19,7 @@ class CustomUserProvider with ChangeNotifier {
   final FirebaseStorage _storage = FirebaseStorage.instance;
 
   List<CustomUser> get users => _users;
+
   CustomUserProvider() {
     _initializeUser();
   }
@@ -62,7 +63,10 @@ class CustomUserProvider with ChangeNotifier {
   // Initialize the user data and payments concurrently
   Future<void> _initializeUser() async {
     _isLoading = true;
-    notifyListeners();
+    // Use post-frame callback to prevent semantics assertion errors during navigation
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      notifyListeners();
+    });
 
     try {
       await Future.wait([
@@ -71,59 +75,104 @@ class CustomUserProvider with ChangeNotifier {
       ]);
     } catch (e) {
       print("Error during initialization: $e");
-    } finally {
-      _isLoading = false;
-      notifyListeners();
+    }
+    // Note: _isLoading will be set to false in fetchUsers() after data is loaded
+  }
+
+  void refreshUserData() {
+    fetchUserDataFromFirestore();  // Call to re-fetch data from Firestore
+  }
+
+  // Fetch the current logged-in user's details from Firestore
+  Future<void> fetchUserDataFromFirestore() async {
+    User? firebaseUser = _auth.currentUser;
+    if (firebaseUser == null) {
+      print("No user is logged in.");
+      return;
+    }
+
+    try {
+      final userRef = FirebaseFirestore.instance.collection('users').doc(firebaseUser.uid);
+      final DocumentSnapshot<Map<String, dynamic>> userDoc = await userRef.get();
+
+      if (userDoc.exists && userDoc.data() != null) {
+        currentUser = CustomUser.fromDocument(userDoc);  // Update the current user
+        // Use post-frame callback to prevent semantics assertion errors during navigation
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          notifyListeners();  // Notify listeners about the data change
+        });
+      } else {
+        print("User data not found.");
+      }
+    } catch (e) {
+      print("Error fetching user details: $e");
     }
   }
 
-    void refreshUserData() {
-      fetchUserDataFromFirestore();  // Call to re-fetch data from Firestore
-    }
-
-    // Fetch the current logged-in user's details from Firestore
-    Future<void> fetchUserDataFromFirestore() async {
-      User? firebaseUser = _auth.currentUser;
-      if (firebaseUser == null) {
-        print("No user is logged in.");
-        return;
-      }
-
-      try {
-        final userRef = FirebaseFirestore.instance.collection('users').doc(firebaseUser.uid);
-        final DocumentSnapshot<Map<String, dynamic>> userDoc = await userRef.get();
-
-        if (userDoc.exists && userDoc.data() != null) {
-          currentUser = CustomUser.fromDocument(userDoc);  // Update the current user
-          notifyListeners();  // Notify listeners about the data change
-        } else {
-          print("User data not found.");
-        }
-      } catch (e) {
-        print("Error fetching user details: $e");
-      }
-    }
-  // Fetch all users from Firestore
-  // Fetch all users from Firestore with real-time updates
+  // FIXED: Fetch all users from Firestore with proper loading state management
   Future<void> fetchUsers() async {
+    print("Starting to fetch users...");
     _isLoading = true;
-    notifyListeners();
+    // Use post-frame callback to prevent semantics assertion errors during navigation
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      notifyListeners();
+    });
 
     try {
       // Use snapshots() to listen for real-time updates
       FirebaseFirestore.instance.collection('users').snapshots().listen((snapshot) {
+        print("Received ${snapshot.docs.length} user documents from Firestore");
+
         _users = snapshot.docs.map((doc) {
-          return CustomUser.fromDocument(doc);
-        }).toList();
-        notifyListeners(); // Notify listeners when data changes
+          try {
+            final userData = doc.data() as Map<String, dynamic>;
+            print("Processing user: ${userData['name']} with role: ${userData['role']}");
+
+            // Create user from document
+            final user = CustomUser.fromDocument(doc);
+
+            // Debug: Print user details
+            print("Created CustomUser - Name: ${user.name}, Role: ${user.role}, ID: ${user.id}");
+
+            return user;
+          } catch (e) {
+            print("Error processing user document ${doc.id}: $e");
+            print("Document data: ${doc.data()}");
+            // Return a placeholder user or skip this user
+            return null;
+          }
+        }).where((user) => user != null).cast<CustomUser>().toList();
+
+        // Debug: Print role distribution
+        final roleCount = <String, int>{};
+        for (final user in _users) {
+          final role = user.role ?? 'No Role';
+          roleCount[role] = (roleCount[role] ?? 0) + 1;
+        }
+        print("Role distribution: $roleCount");
+
+        _isLoading = false; // Set loading to false after data is processed
+        // Use post-frame callback to prevent semantics assertion errors during navigation
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          notifyListeners(); // Notify listeners when data changes
+        });
+      }, onError: (error) {
+        print("Error in users stream: $error");
+        _isLoading = false;
+        // Use post-frame callback to prevent semantics assertion errors
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          notifyListeners();
+        });
       });
     } catch (e) {
-      print("Error fetching users: $e");
-    } finally {
+      print("Error setting up users listener: $e");
       _isLoading = false;
+      // Use post-frame callback to prevent semantics assertion errors
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        notifyListeners();
+      });
     }
   }
-
 
   // Fetch payments for the current user
   Future<void> fetchPaymentsForCurrentUser() async {
@@ -144,7 +193,10 @@ class CustomUserProvider with ChangeNotifier {
         return Payment.fromMap(doc.data());
       }).toList();
 
-      notifyListeners();
+      // Use post-frame callback to prevent semantics assertion errors during navigation
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        notifyListeners();
+      });
     } catch (e) {
       print('Error fetching payments: $e');
     }
@@ -190,7 +242,10 @@ class CustomUserProvider with ChangeNotifier {
 
       if (userDoc.exists && userDoc.data() != null) {
         currentUser = CustomUser.fromDocument(userDoc);
-        notifyListeners();
+        // Use post-frame callback to prevent semantics assertion errors during navigation
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          notifyListeners();
+        });
         return currentUser;
       } else {
         print("User data not found.");
@@ -248,7 +303,8 @@ class CustomUserProvider with ChangeNotifier {
       notifyListeners();
     }
   }
-// Fetch a user by their user ID
+
+  // Fetch a user by their user ID
   Future<CustomUser?> fetchUserById(String userId) async {
     try {
       final DocumentSnapshot<Map<String, dynamic>> userDoc =
@@ -265,6 +321,7 @@ class CustomUserProvider with ChangeNotifier {
       return null;
     }
   }
+
   bool isFavoriteStore(String storeId) {
     return currentUser?.favorites!.contains(storeId) ?? false;
   }
@@ -275,7 +332,10 @@ class CustomUserProvider with ChangeNotifier {
       if (user == null) {
         print("User is currently signed out.");
         currentUser = null;
-        notifyListeners();
+        // Use post-frame callback to prevent semantics assertion errors during navigation
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          notifyListeners();
+        });
       } else {
         print("User is signed in.");
         fetchUserDetails();
@@ -288,7 +348,10 @@ class CustomUserProvider with ChangeNotifier {
     try {
       await FirebaseAuth.instance.signOut();
       currentUser = null;
-      notifyListeners();
+      // Use post-frame callback to prevent semantics assertion errors during navigation
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        notifyListeners();
+      });
     } catch (e) {
       print('Error signing out: $e');
     }
@@ -302,17 +365,20 @@ class CustomUserProvider with ChangeNotifier {
           .doc(user.id)
           .set(user.toMap(), SetOptions(merge: true));
       currentUser = user;
-      notifyListeners();
+      // Use post-frame callback to prevent semantics assertion errors during navigation
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        notifyListeners();
+      });
     } catch (e) {
       print("Error saving user details: $e");
     }
   }
+
   Future<void> deleteUser(String userId, {bool isOwner = false, String? storeId}) async {
     User? firebaseUser = FirebaseAuth.instance.currentUser;
     if (firebaseUser != null) {
       print("User found: ${firebaseUser.uid}");
       try {
-
         // Step 1: Delete the user's store if the user is an owner
         if (isOwner && storeId != null) {
           await _deleteStore(storeId);
@@ -327,7 +393,6 @@ class CustomUserProvider with ChangeNotifier {
           "uid": userId,
         });
 
-
         _users.removeWhere((user) => user.id == userId);
         notifyListeners();
       } catch (e) {
@@ -336,8 +401,6 @@ class CustomUserProvider with ChangeNotifier {
     } else {
       print("User not found in Firebase Authentication.");
     }
-
-
   }
 
   Future<void> _deleteStore(String storeId) async {
@@ -361,7 +424,8 @@ class CustomUserProvider with ChangeNotifier {
       print('Error deleting store: $e');
     }
   }
-  // Add user to Firebase Authentication and Firestore
+
+  // ENHANCED: Add user with proper role validation
   Future<void> addUser({
     required String email,
     required String password,
@@ -371,7 +435,10 @@ class CustomUserProvider with ChangeNotifier {
   }) async {
     _isLoading = true;
     notifyListeners();
+
     try {
+      print("Creating user with role: $role");
+
       // Create user in Firebase Authentication
       UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
         email: email,
@@ -389,19 +456,25 @@ class CustomUserProvider with ChangeNotifier {
         role: role, // Role set from input
       );
 
+      print("Adding user to Firestore with data: ${newUser.toMap()}");
+
       // Add user details to Firestore
       await FirebaseFirestore.instance.collection('users').doc(newUser.id).set(newUser.toMap());
+
+      print("User created successfully with ID: ${newUser.id} and role: ${newUser.role}");
 
       // Set the new user to the provider's state
       currentUser = newUser;
     } catch (e) {
       print("Error adding new user: $e");
+      rethrow;
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
-// Fetch a user by their user ID
+
+  // Fetch a user by their user ID
   Future<CustomUser?> getUserById(String userId) async {
     try {
       final DocumentSnapshot<Map<String, dynamic>> userDoc =
@@ -418,46 +491,56 @@ class CustomUserProvider with ChangeNotifier {
       return null;
     }
   }
-// Add user to Firebase Authentication and Firestore
+
+  // Add admin with explicit role
   Future<void> addAdmin({
     required String email,
     required String password,
     required String name,
     required String phoneNumber,
   }) async {
-    _isLoading = true;
-    notifyListeners();
-    try {
-      // Create user in Firebase Authentication
-      UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-
-      // Construct a new CustomUser object for Admin
-      CustomUser newUser = CustomUser(
-        id: userCredential.user!.uid,
-        name: name,
-        email: email,
-        phoneNumber: phoneNumber,
-        address: '', // Default values can be changed as needed
-        profileImageUrl: '', // Default profile image (or set your own)
-        role: 'Admin', // Role is set to 'Admin'
-      );
-
-      // Add admin user details to Firestore
-      await FirebaseFirestore.instance.collection('users').doc(newUser.id).set(newUser.toMap());
-
-      // Set the new user to the provider's state
-      currentUser = newUser;
-    } catch (e) {
-      print("Error adding new admin: $e");
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
+    await addUser(
+      email: email,
+      password: password,
+      name: name,
+      phoneNumber: phoneNumber,
+      role: 'Admin',
+    );
   }
-// Change password for the current user
+
+  // ADDED: Method to add Owner specifically
+  Future<void> addOwner({
+    required String email,
+    required String password,
+    required String name,
+    required String phoneNumber,
+  }) async {
+    await addUser(
+      email: email,
+      password: password,
+      name: name,
+      phoneNumber: phoneNumber,
+      role: 'Owner',
+    );
+  }
+
+  // ADDED: Method to add regular User specifically
+  Future<void> addRegularUser({
+    required String email,
+    required String password,
+    required String name,
+    required String phoneNumber,
+  }) async {
+    await addUser(
+      email: email,
+      password: password,
+      name: name,
+      phoneNumber: phoneNumber,
+      role: 'User',
+    );
+  }
+
+  // Change password for the current user
   Future<void> changePassword(String newPassword) async {
     try {
       User? user = _auth.currentUser;
@@ -478,5 +561,27 @@ class CustomUserProvider with ChangeNotifier {
     }
   }
 
+  // ADDED: Debug method to check Firestore data
+  Future<void> debugFirestoreData() async {
+    try {
+      print("=== DEBUGGING FIRESTORE USER DATA ===");
 
+      final snapshot = await FirebaseFirestore.instance.collection('users').get();
+      print("Total documents in users collection: ${snapshot.docs.length}");
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        print("---");
+        print("Document ID: ${doc.id}");
+        print("Name: ${data['name']}");
+        print("Email: ${data['email']}");
+        print("Role: ${data['role']} (Type: ${data['role']?.runtimeType})");
+        print("Full document: $data");
+      }
+
+      print("=== END DEBUG ===");
+    } catch (e) {
+      print("Error debugging Firestore data: $e");
+    }
+  }
 }

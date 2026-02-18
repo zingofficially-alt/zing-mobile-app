@@ -15,6 +15,13 @@ class StoreProvider with ChangeNotifier {
     fetchStores();
   }
 
+  // Helper to sanitize image URLs - removes placeholder URLs
+  String _sanitizeImageUrl(String? url) {
+    if (url == null || url.isEmpty) return '';
+    if (url.contains('via.placeholder.com')) return '';
+    return url;
+  }
+
   Store? _selectedStore;
 
   Store? get selectedStore => _selectedStore;
@@ -36,10 +43,21 @@ class StoreProvider with ChangeNotifier {
 
     try {
       QuerySnapshot storeSnapshot = await FirebaseFirestore.instance.collection('stores').get();
+      print('📦 Fetched ${storeSnapshot.docs.length} store documents from Firestore');
 
-      _stores = await Future.wait(storeSnapshot.docs.map((doc) async {
-        return await _storeFromFirestore(doc);
-      }).toList());
+      List<Store> fetchedStores = [];
+      for (var doc in storeSnapshot.docs) {
+        try {
+          Store store = await _storeFromFirestore(doc);
+          fetchedStores.add(store);
+        } catch (e) {
+          print('⚠️ Error parsing store ${doc.id}: $e');
+          // Continue with other stores instead of failing completely
+        }
+      }
+
+      _stores = fetchedStores;
+      print('✅ Successfully loaded ${_stores.length} stores');
 
       isLoading = false;
 
@@ -47,7 +65,7 @@ class StoreProvider with ChangeNotifier {
         notifyListeners(); // Notify after fetching completes
       });
     } catch (e) {
-      print('Error fetching stores: $e');
+      print('❌ Error fetching stores: $e');
       isLoading = false;
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -73,7 +91,7 @@ class StoreProvider with ChangeNotifier {
         description: productData['description'],
         price: productData['price'].toDouble(),
         rating: productData['rating'].toDouble(),
-        imageUrl: productData['imageUrl'] ?? 'https://via.placeholder.com/150',
+        imageUrl: _sanitizeImageUrl(productData['imageUrl']),
       );
     }).toList();
   }
@@ -88,9 +106,8 @@ class StoreProvider with ChangeNotifier {
       final storeDoc = await FirebaseFirestore.instance.collection('stores').doc(storeId).get();
 
       if (storeDoc.exists) {
-        // Extract the data map and pass it to fromMap
-        Map<String, dynamic> storeData = storeDoc.data() as Map<String, dynamic>;
-        return Store.fromMap(storeData); // Correctly map the store data
+        // Use the private helper method to properly fetch products from subcollection
+        return await _storeFromFirestore(storeDoc);
       } else {
         print('Error: Store not found for storeId: $storeId');
         return null; // Return null if the store document does not exist
@@ -313,6 +330,12 @@ class StoreProvider with ChangeNotifier {
   }
 
   Future<Store?> fetchStore(String storeId) async {
+    // Check if storeId is valid before querying
+    if (storeId.isEmpty) {
+      print('Cannot fetch store: Store ID is empty');
+      return null;
+    }
+
     try {
       DocumentSnapshot<Map<String, dynamic>> snapshot = await FirebaseFirestore.instance
           .collection('stores')
@@ -320,8 +343,8 @@ class StoreProvider with ChangeNotifier {
           .get();
 
       if (snapshot.exists) {
-        final storeData = snapshot.data();
-        return Store.fromMap(storeData!); // Parse the store data
+        // Use the private helper method to properly fetch products from subcollection
+        return await _storeFromFirestore(snapshot);
       }
     } catch (e) {
       print('Error fetching store data: $e');
@@ -334,13 +357,14 @@ class StoreProvider with ChangeNotifier {
   Future<Store> _storeFromFirestore(DocumentSnapshot doc) async {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
 
-    // Owner data
+    // Owner data - with null safety
+    final ownerData = data['owner'] as Map<String, dynamic>?;
     Owner owner = Owner(
-      id: data['owner']['id'] ?? '', // Add fallback for missing data
-      name: data['owner']['name'] ?? '',
-      email: data['owner']['email'] ?? '',
-      phone: data['owner']['phone'] ?? '',
-      profileImageUrl: data['owner']['profileImageUrl'] ?? '',
+      id: ownerData?['id'] ?? '',
+      name: ownerData?['name'] ?? '',
+      email: ownerData?['email'] ?? '',
+      phone: ownerData?['phone'] ?? '',
+      profileImageUrl: _sanitizeImageUrl(ownerData?['profileImageUrl']),
     );
 
     // Step 1: Fetch products for this store from the "products" sub-collection
@@ -360,7 +384,7 @@ class StoreProvider with ChangeNotifier {
         description: productData['description'] ?? '',
         price: (productData['price'] ?? 0).toDouble(), // Handle missing or incorrect data
         rating: (productData['rating'] ?? 0).toDouble(),
-        imageUrl: productData['imageUrl'] ?? '',
+        imageUrl: _sanitizeImageUrl(productData['imageUrl']),
       );
     }).toList();
 
@@ -371,7 +395,7 @@ class StoreProvider with ChangeNotifier {
       phoneNumber: data['phoneNumber'] ?? '',
       description: data['description'] ?? '',
       category: data['category'] ?? '',
-      imageUrl: data['imageUrl'] ?? '',
+      imageUrl: _sanitizeImageUrl(data['imageUrl']),
       owner: owner,
       products: products, // Attach fetched products to the store
       location: data['location'] ?? GeoPoint(0, 0), // Default location if missing

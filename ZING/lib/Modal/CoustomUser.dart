@@ -1,5 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+// Helper to sanitize image URLs - removes placeholder URLs
+String _sanitizeImageUrl(String? url) {
+  if (url == null || url.isEmpty) return '';
+  if (url.contains('via.placeholder.com')) return '';
+  return url;
+}
+
 class CustomUser {
   String id; // Firebase Authentication UID
   String name;
@@ -155,6 +162,12 @@ class Store {
   });
 // Add this function in your Store model
   Future<double> getAverageRating() async {
+    // Check if store ID is valid before querying
+    if (this.id == null || this.id!.isEmpty) {
+      print('Cannot fetch ratings: Store ID is null or empty');
+      return 0.0;
+    }
+
     try {
       QuerySnapshot ratingsSnapshot = await FirebaseFirestore.instance
           .collection('stores')
@@ -184,6 +197,12 @@ class Store {
   // Submit rating method
   // Add this function in your Store model
   Future<void> submitRating(String userId, double rating) async {
+    // Check if store ID is valid before submitting
+    if (this.id == null || this.id!.isEmpty) {
+      print('Cannot submit rating: Store ID is null or empty');
+      return;
+    }
+
     try {
       // Assuming you have a 'ratings' subcollection in your store's document
       await FirebaseFirestore.instance
@@ -202,11 +221,28 @@ class Store {
     }
   }
 
+  // Check if user has rated (async version for Firestore check)
+  Future<bool> userHasRated(String userId) async {
+    // Check if store ID is valid
+    if (this.id == null || this.id!.isEmpty) {
+      print('Cannot check if user has rated: Store ID is null or empty');
+      return false;
+    }
 
-  // Check if the user has already rated
-  bool userHasRated(String userId) {
-    return ratings.any((rating) => rating.userId == userId);
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('stores')
+          .doc(this.id)
+          .collection('ratings')
+          .doc(userId)
+          .get();
+      return doc.exists;
+    } catch (e) {
+      print('Error checking if user has rated: $e');
+      return false;
+    }
   }
+
   // Convert Store object to a map for Firestore
   Map<String, dynamic> toMap() {
     return {
@@ -241,7 +277,7 @@ class Store {
           .toList() ??
           [],
       category: data['category'] ?? '',
-      imageUrl: data['imageUrl'] ?? '',
+      imageUrl: _sanitizeImageUrl(data['imageUrl']),
       products: (data['products'] as List<dynamic>?)
           ?.map((productMap) => Product.fromMap(productMap))
           .toList() ??
@@ -253,7 +289,9 @@ class Store {
           ?.map((videoMap) => YouTubeVideo.fromMap(videoMap))
           .toList() ??
           [],
-      deliveryOptions:(data['deliveryOptions'] as List<dynamic>).map((item) => item as String).toList(),
+      deliveryOptions: data['deliveryOptions'] != null
+          ? (data['deliveryOptions'] as List<dynamic>).map((item) => item as String).toList()
+          : [],
       deliveryCost: data['deliveryCost']?.toDouble(),
     );
   }
@@ -313,6 +351,7 @@ class Product {
   final String? imageUrl; // Product image URL
   final bool isAvailable; // Availability status
   final double? discount; // Discount percentage (nullable)
+  final int quantity; // Product quantity in stock
 
   Product({
     required this.id,
@@ -323,6 +362,7 @@ class Product {
     this.imageUrl,
     this.isAvailable = true, // Default availability
     this.discount, // Optional field, default is null
+    this.quantity = 0, // Default quantity is 0
   });
 
   // Convert Product object to a map for Firestore
@@ -336,6 +376,7 @@ class Product {
       'imageUrl': imageUrl,
       'isAvailable': isAvailable,
       'discount': discount,
+      'quantity': quantity,
     };
   }
 
@@ -347,9 +388,10 @@ class Product {
       description: map['description'] ?? '',
       price: map['price']?.toDouble() ?? 0.0,
       rating: map['rating']?.toDouble() ?? 0.0,
-      imageUrl: map['imageUrl'] ?? '',
+      imageUrl: _sanitizeImageUrl(map['imageUrl']),
       isAvailable: map['isAvailable'] ?? true,
       discount: map['discount']?.toDouble(),
+      quantity: map['quantity'] ?? 0,
     );
   }
 
@@ -388,7 +430,7 @@ class Owner {
       name: map['name'] ?? '',
       email: map['email'] ?? '',
       phone: map['phone'] ?? '',
-      profileImageUrl: map['profileImageUrl'] ?? '',
+      profileImageUrl: _sanitizeImageUrl(map['profileImageUrl']),
     );
   }
 }

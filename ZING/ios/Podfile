@@ -32,6 +32,10 @@ target 'Runner' do
   use_modular_headers!
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+
+  # Add reCAPTCHA Enterprise for Firebase Phone Authentication
+  pod 'RecaptchaEnterprise'
+
   target 'RunnerTests' do
     inherit! :search_paths
   end
@@ -40,5 +44,40 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+
+    # Fix for Apple Silicon simulator architecture
+    target.build_configurations.each do |config|
+      config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'i386'
+      config.build_settings['ONLY_ACTIVE_ARCH'] = 'YES'
+      config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
+
+      # Workaround for Swift stdlib issues in iOS 18+ simulators
+      config.build_settings['DEAD_CODE_STRIPPING'] = 'YES'
+      config.build_settings['LD_RUNPATH_SEARCH_PATHS'] ||= ['$(inherited)', '@executable_path/Frameworks']
+
+      # Fix for WebKit framework linking issue with flutter_inappwebview
+      config.build_settings['ENABLE_BITCODE'] = 'NO'
+
+      # Fix for privacy bundle resource issues - disable validation
+      config.build_settings['VALIDATE_PRIVACY_RESOURCE_BUNDLES'] = 'NO'
+    end
   end
+
+  # Fix for privacy manifest bundle issues
+  installer.aggregate_targets.each do |target|
+    target.xcconfigs.each do |variant, xcconfig|
+      xcconfig_path = target.client_root + target.xcconfig_relative_path(variant)
+      IO.write(xcconfig_path, IO.read(xcconfig_path).gsub("DT_TOOLCHAIN_DIR", "TOOLCHAIN_DIR"))
+    end
+  end
+
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      if config.base_configuration_reference.is_a? Xcodeproj::Project::Object::PBXFileReference
+        xcconfig_path = config.base_configuration_reference.real_path
+        IO.write(xcconfig_path, IO.read(xcconfig_path).gsub("DT_TOOLCHAIN_DIR", "TOOLCHAIN_DIR"))
+      end
+    end
+  end
+
 end
