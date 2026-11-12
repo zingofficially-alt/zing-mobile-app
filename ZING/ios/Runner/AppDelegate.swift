@@ -13,7 +13,13 @@ import Firebase
     FirebaseApp.configure()
 
     // Configure Google Maps
-    GMSServices.provideAPIKey("AIzaSyD-Y7nIBM2QYYBVa7pTvT7GPCvFqEWtfN4")
+    // Key comes from .env -> Flutter/Secrets.xcconfig -> Info.plist (GMSApiKey).
+    if let mapsKey = Bundle.main.object(forInfoDictionaryKey: "GMSApiKey") as? String,
+       !mapsKey.isEmpty, !mapsKey.hasPrefix("$(") {
+      GMSServices.provideAPIKey(mapsKey)
+    } else {
+      NSLog("ZING: GOOGLE_MAPS_API_KEY missing. Add it to .env and run `pod install`.")
+    }
 
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)

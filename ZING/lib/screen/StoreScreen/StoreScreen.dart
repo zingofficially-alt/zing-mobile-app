@@ -25,6 +25,7 @@ import '../../Widgets/Recommendations/RecommendedProductsRow.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'customCarousel.dart';
+import '../../config/env.dart';
 
 class StoreDetailScreen extends StatefulWidget {
   final Store store;
@@ -306,7 +307,11 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> with SingleTicker
     String origin = '${_userPosition!.latitude},${_userPosition!.longitude}';
     String destination =
         '${widget.store.location.latitude},${widget.store.location.longitude}';
-    String apiKey = 'YOUR_API_KEY'; // Replace with your actual API key
+    const String apiKey = Env.googleDirectionsApiKey; // From .env
+    if (apiKey.isEmpty) {
+      debugPrint('GOOGLE_DIRECTIONS_API_KEY not set in .env; skipping directions.');
+      return;
+    }
 
     final url = '$baseUrl'
         'origin=$origin&destination=$destination&key=$apiKey';

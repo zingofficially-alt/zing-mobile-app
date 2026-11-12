@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../config/env.dart';
 
 class TranslationService {
-  final String apiKey = "AIzaSyD-Y7nIBM2QYYBVa7pTvT7GPCvFqEWtfN4";  // Replace with your API key
+  // From .env (GOOGLE_TRANSLATE_API_KEY); see lib/config/env.dart.
+  final String apiKey = Env.googleTranslateApiKey;
 
   Future<String?> translateText(String text, String targetLang) async {
     try {

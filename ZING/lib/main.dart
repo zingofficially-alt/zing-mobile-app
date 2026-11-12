@@ -22,6 +22,7 @@ import 'dart:async';
 import 'package:zing/screen/StartingScreens/onboardingScreen.dart';
 
 import 'Cart/CartProvider.dart';
+import 'config/env.dart';
 import 'Service/AdvertisementProvider.dart';
 import 'Service/RecommendationProvider.dart';
 import 'Service/ChatProvider.dart';
@@ -79,7 +80,16 @@ void main() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  await Firebase.initializeApp();
+  if (kIsWeb) {
+    // Web has no google-services file; options come from .env.
+    if (!Env.hasFirebaseWebConfig) {
+      throw StateError(
+          'Firebase web config missing. Run with --dart-define-from-file=.env');
+    }
+    await Firebase.initializeApp(options: Env.firebaseWebOptions);
+  } else {
+    await Firebase.initializeApp();
+  }
 
   if (!kIsWeb && Platform.isIOS) {
     debugPrint('Firebase initialized for iOS');

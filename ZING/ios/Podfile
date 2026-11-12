@@ -4,6 +4,26 @@ platform :ios, '14.0'
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
+# Generate Flutter/Secrets.xcconfig (git-ignored) from the project-root .env so
+# native iOS code can read keys via Info.plist. Re-run `pod install` after
+# changing .env.
+env_path = File.expand_path(File.join('..', '..', '.env'), __FILE__)
+secrets_path = File.expand_path(File.join('..', 'Flutter', 'Secrets.xcconfig'), __FILE__)
+secrets = ["// Generated from .env by ios/Podfile. Do not edit or commit."]
+if File.exist?(env_path)
+  File.readlines(env_path).each do |line|
+    line = line.strip
+    next if line.empty? || line.start_with?('#') || !line.include?('=')
+    key, value = line.split('=', 2)
+    value = value.strip.delete_prefix('"').delete_suffix('"')
+    # xcconfig treats "//" as a comment; escape it so URLs survive.
+    secrets << "#{key.strip} = #{value.gsub('//', '/$()/')}"
+  end
+else
+  Pod::UI.warn 'ZING: .env not found - copy .env.example to .env and add your keys.'
+end
+File.write(secrets_path, secrets.join("\n") + "\n")
+
 project 'Runner', {
   'Debug' => :debug,
   'Profile' => :release,

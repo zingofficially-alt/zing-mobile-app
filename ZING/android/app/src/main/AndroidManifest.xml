@@ -15,7 +15,7 @@
         android:enableOnBackInvokedCallback="true"
         tools:targetApi="33">
         <meta-data android:name="com.google.android.geo.API_KEY"
-            android:value="AIzaSyD-Y7nIBM2QYYBVa7pTvT7GPCvFqEWtfN4"/>
+            android:value="${GOOGLE_MAPS_API_KEY}"/>
         <meta-data
             android:name="com.google.android.gms.version"
             android:value="@integer/google_play_services_version" />

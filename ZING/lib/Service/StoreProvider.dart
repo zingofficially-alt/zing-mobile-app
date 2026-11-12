@@ -455,21 +455,22 @@ class StoreProvider with ChangeNotifier {
 // Fetch owner details by storeId
   Future<CustomUser?> fetchOwnerByStoreId(String storeId) async {
     try {
-      // Query the users collection for an owner whose storeId matches
-      QuerySnapshot<Map<String, dynamic>> snapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .where('role', isEqualTo: 'Owner')
-          .where('store.id', isEqualTo: storeId)
+      // The store document records its owner's uid; read that user directly
+      // (security rules do not allow querying the users collection).
+      final storeDoc = await FirebaseFirestore.instance
+          .collection('stores')
+          .doc(storeId)
           .get();
-
-      if (snapshot.docs.isNotEmpty) {
-        // Fetch the first matched owner (assuming one owner per store)
-        final ownerDoc = snapshot.docs.first;
-        return CustomUser.fromDocument(ownerDoc);
-      } else {
+      final ownerId = (storeDoc.data()?['owner'] as Map<String, dynamic>?)?['id'] as String?;
+      if (ownerId == null || ownerId.isEmpty) {
         print('No owner found for storeId: $storeId');
         return null;
       }
+      final ownerDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(ownerId)
+          .get();
+      return ownerDoc.exists ? CustomUser.fromDocument(ownerDoc) : null;
     } catch (e) {
       print('Error fetching owner by storeId: $e');
       return null;

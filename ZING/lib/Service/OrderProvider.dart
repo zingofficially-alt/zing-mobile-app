@@ -40,19 +40,21 @@ class OrderProvider with ChangeNotifier {
         final userChunks = _splitList(userIds, 10); // Firestore 'whereIn' limit
         final userMap = <String, CustomUser>{};
 
+        // Read each customer document individually: security rules allow
+        // reading a single user document but not querying the collection.
         for (var chunk in userChunks) {
-          final userQuerySnapshot = await _firestore
-              .collection('users')
-              .where(FieldPath.documentId, whereIn: chunk)
-              .get();
-
-          for (var doc in userQuerySnapshot.docs) {
-            userMap[doc.id] = CustomUser.fromMap(doc.data());
+          final docs = await Future.wait(
+            chunk.map((id) => _firestore.collection('users').doc(id).get()),
+          );
+          for (var doc in docs) {
+            final data = doc.data();
+            if (data != null) userMap[doc.id] = CustomUser.fromMap(data);
           }
         }
 
         for (var order in fetchedOrders) {
-          order.userDetails = userMap[order.userId]!;
+          final user = userMap[order.userId];
+          if (user != null) order.userDetails = user;
         }
       }
 
@@ -73,8 +75,10 @@ class OrderProvider with ChangeNotifier {
       List<Product> products,
       double totalPrice,
       String deliveryMethod,
-      CustomUser userData,
-      ) async {
+      CustomUser userData, {
+      double deliveryFee = 0.0,
+      String? deliveryAddress,
+      }) async {
     try {
       final batch = _firestore.batch();
 
@@ -85,6 +89,10 @@ class OrderProvider with ChangeNotifier {
         'storeId': store.id,
         'storeName': store.name,
         'deliveryMethod': deliveryMethod,
+        'deliveryFee': deliveryFee,
+        if (deliveryAddress != null && deliveryAddress.isNotEmpty)
+          'deliveryAddress': deliveryAddress,
+        'status': 'Pending',
         'totalPrice': totalPrice,
         'placedAt': Timestamp.now(),
         'products': products.map((product) => product.toMap()).toList(),

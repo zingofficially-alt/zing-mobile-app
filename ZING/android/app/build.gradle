@@ -6,6 +6,15 @@ plugins {
     id "dev.flutter.flutter-gradle-plugin"
     id("com.google.gms.google-services")
 }
+// Secrets live in the project-root .env file (git-ignored). See .env.example.
+def envProperties = new Properties()
+def envFile = rootProject.file('../.env')
+if (envFile.exists()) {
+    envFile.withInputStream { envProperties.load(it) }
+} else {
+    logger.warn("ZING: .env not found - copy .env.example to .env and add your keys.")
+}
+
 def keystoreProperties = new Properties()
 def keystorePropertiesFile = rootProject.file('key.properties')
 if (keystorePropertiesFile.exists()) {
@@ -38,6 +47,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode 26
         versionName "2.1.5"
+        manifestPlaceholders += [GOOGLE_MAPS_API_KEY: envProperties.getProperty('GOOGLE_MAPS_API_KEY', '')]
         multiDexEnabled true
     }
 

@@ -722,30 +722,51 @@ class _CartScreenState extends State<CartScreen> {
                       throw Exception('User or cart items not available');
                     }
 
-                    // Find store for the first product (assuming all products are from same store)
-                    final firstProductId = cartProvider.items.first.id;
-                    final store = storeProvider.stores.firstWhere(
-                          (store) => store.products.any((product) => product.id == firstProductId),
-                      orElse: () => throw Exception('Store not found'),
-                    );
+                    final isHomeDelivery = _selectedDeliveryMethod == 'Home Delivery';
+                    const double deliveryFee = 50.0;
 
-                    // Add delivery fee and address if home delivery
-                    Map<String, dynamic> additionalData = {};
-                    if (_selectedDeliveryMethod == 'Home Delivery') {
-                      additionalData = {
-                        'deliveryFee': 50.0,
-                        'deliveryAddress': _addressController.text,
-                      };
+                    // Group cart items by the store they belong to, so each
+                    // store receives its own order.
+                    final Map<Store, List<CartItem>> itemsByStore = {};
+                    for (final item in cartProvider.items) {
+                      final store = storeProvider.stores.firstWhere(
+                        (s) => item.storeId != null && item.storeId!.isNotEmpty
+                            ? s.id == item.storeId
+                            : s.products.any((p) => p.id == item.id),
+                        orElse: () => throw Exception('Store not found for "${item.name}"'),
+                      );
+                      itemsByStore.putIfAbsent(store, () => []).add(item);
                     }
 
-                    await orderProvider.placeOrder(
-                      currentUser.id,
-                      store,
-                      cartProvider.items.cast<Product>(),
-                      total,
-                      _selectedDeliveryMethod!,
-                      currentUser,
-                    );
+                    for (final entry in itemsByStore.entries) {
+                      // Convert cart lines into order products. One entry per
+                      // unit, matching how "Buy Now" records quantities.
+                      final products = <Product>[
+                        for (final item in entry.value)
+                          for (int i = 0; i < item.quantity; i++)
+                            Product(
+                              id: item.id,
+                              name: item.name,
+                              price: item.price,
+                              imageUrl: item.imageUrl,
+                              quantity: 1,
+                            ),
+                      ];
+                      final subtotal = entry.value.fold<double>(
+                          0, (sum, item) => sum + item.totalPrice);
+
+                      await orderProvider.placeOrder(
+                        currentUser.id,
+                        entry.key,
+                        products,
+                        subtotal + (isHomeDelivery ? deliveryFee : 0.0),
+                        _selectedDeliveryMethod!,
+                        currentUser,
+                        deliveryFee: isHomeDelivery ? deliveryFee : 0.0,
+                        deliveryAddress:
+                            isHomeDelivery ? _addressController.text.trim() : null,
+                      );
+                    }
 
                     // Log purchase-complete event for Retail API
                     final recProvider = Provider.of<RecommendationProvider>(

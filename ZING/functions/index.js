@@ -109,12 +109,39 @@ async function deleteRetailProduct(retailId) {
 // ---------------------------------------------------------------------------
 
 exports.deleteUser = onCall(async (request) => {
-  const uid = request.data.uid;
+  // Only signed-in callers may use this function.
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const uid = request.data && request.data.uid;
+  if (typeof uid !== "string" || uid.length === 0) {
+    throw new HttpsError("invalid-argument", "A valid uid is required.");
+  }
+
+  // A user may delete their own account; anyone else's needs an Admin.
+  const callerUid = request.auth.uid;
+  if (callerUid !== uid) {
+    const callerDoc = await admin.firestore()
+        .collection("users").doc(callerUid).get();
+    const callerRole = callerDoc.exists ? callerDoc.get("role") : null;
+    if (callerRole !== "Admin") {
+      logger.warn("deleteUser: denied", {callerUid, targetUid: uid});
+      throw new HttpsError("permission-denied",
+          "Only an admin can delete other accounts.");
+    }
+  }
+
   try {
     await admin.auth().deleteUser(uid);
+    logger.info("deleteUser: deleted", {callerUid, targetUid: uid});
     return {message: "User deleted successfully"};
   } catch (error) {
-    throw new HttpsError("not-found", "User not found", error);
+    if (error.code === "auth/user-not-found") {
+      throw new HttpsError("not-found", "User not found");
+    }
+    logger.error("deleteUser: failed", {callerUid, targetUid: uid, error});
+    throw new HttpsError("internal", "Could not delete user.");
   }
 });
 

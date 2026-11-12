@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -19,6 +21,11 @@ class CustomUserProvider with ChangeNotifier {
   final FirebaseStorage _storage = FirebaseStorage.instance;
 
   List<CustomUser> get users => _users;
+
+  // Live listener on the whole users collection. Only admins may run it
+  // (Firestore rules deny listing users to everyone else).
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _usersSub;
+  StreamSubscription<User?>? _authSub;
 
   CustomUserProvider() {
     _initializeUser();
@@ -68,15 +75,43 @@ class CustomUserProvider with ChangeNotifier {
       notifyListeners();
     });
 
-    try {
-      await Future.wait([
-        fetchUsers(),
-        fetchPaymentsForCurrentUser(),
-      ]);
-    } catch (e) {
-      print("Error during initialization: $e");
-    }
-    // Note: _isLoading will be set to false in fetchUsers() after data is loaded
+    // Load the signed-in user's own data. The full user list is only loaded
+    // for admins; guests and normal users never read other users' documents.
+    _authSub = _auth.authStateChanges().listen((User? firebaseUser) async {
+      try {
+        if (firebaseUser == null) {
+          _stopUsersListener();
+          return;
+        }
+        final me = await fetchUserDetails();
+        await fetchPaymentsForCurrentUser();
+        if (me?.role == 'Admin') {
+          await fetchUsers();
+        } else {
+          _stopUsersListener();
+        }
+      } catch (e) {
+        print("Error during initialization: $e");
+      } finally {
+        _isLoading = false;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          notifyListeners();
+        });
+      }
+    });
+  }
+
+  void _stopUsersListener() {
+    _usersSub?.cancel();
+    _usersSub = null;
+    _users = [];
+  }
+
+  @override
+  void dispose() {
+    _usersSub?.cancel();
+    _authSub?.cancel();
+    super.dispose();
   }
 
   void refreshUserData() {
@@ -111,6 +146,11 @@ class CustomUserProvider with ChangeNotifier {
 
   // FIXED: Fetch all users from Firestore with proper loading state management
   Future<void> fetchUsers() async {
+    if (currentUser?.role != 'Admin') {
+      // Only admins can list users.
+      _stopUsersListener();
+      return;
+    }
     print("Starting to fetch users...");
     _isLoading = true;
     // Use post-frame callback to prevent semantics assertion errors during navigation
@@ -120,7 +160,8 @@ class CustomUserProvider with ChangeNotifier {
 
     try {
       // Use snapshots() to listen for real-time updates
-      FirebaseFirestore.instance.collection('users').snapshots().listen((snapshot) {
+      await _usersSub?.cancel();
+      _usersSub = FirebaseFirestore.instance.collection('users').snapshots().listen((snapshot) {
         print("Received ${snapshot.docs.length} user documents from Firestore");
 
         _users = snapshot.docs.map((doc) {
@@ -348,6 +389,7 @@ class CustomUserProvider with ChangeNotifier {
     try {
       await FirebaseAuth.instance.signOut();
       currentUser = null;
+      _stopUsersListener();
       // Use post-frame callback to prevent semantics assertion errors during navigation
       WidgetsBinding.instance.addPostFrameCallback((_) {
         notifyListeners();
