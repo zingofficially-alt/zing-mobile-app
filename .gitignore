@@ -49,3 +49,11 @@ app.*.map.json
 .env.*
 !.env.example
 /ios/Flutter/Secrets.xcconfig
+
+# Secrets: never commit
+*firebase-adminsdk*.json
+serviceAccount*.json
+server/.env
+server/node_modules/
+supabase/.temp/
+supabase/.env
