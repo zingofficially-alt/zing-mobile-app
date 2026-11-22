@@ -1,11 +1,10 @@
 import 'dart:io';
 import 'dart:async';
 
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:zing/screen/StartingScreens/LoginScreen.dart' show authErrorMessage;
 import 'package:provider/provider.dart';
 import 'dart:ui';
 import 'package:flutter_keyboard_visibility/flutter_keyboard_visibility.dart';
@@ -241,13 +240,12 @@ class _CreateAccountScreenState extends State<CreateAccountScreen>
   }
 
   void _setupAuthStateListener() {
-    FirebaseAuth.instance.authStateChanges().listen((User? user) {
+    Supabase.instance.client.auth.onAuthStateChange.listen((AuthState state) {
+      final user = state.session?.user;
       if (user != null) {
-        print("✅ User authenticated: ${user.email ?? user.phoneNumber}");
-        print("📧 Email verified: ${user.emailVerified}");
-        print("🆔 UID: ${user.uid}");
+        print("User authenticated: ${user.email ?? user.phone}");
       } else {
-        print("👤 User signed out");
+        print("User signed out");
       }
     });
   }
@@ -581,59 +579,25 @@ class _CreateAccountScreenState extends State<CreateAccountScreen>
 
       print("Attempting verification for: $phoneNumber");
 
-      await FirebaseAuth.instance.verifyPhoneNumber(
-        phoneNumber: phoneNumber,
-        timeout: const Duration(seconds: 120), // Increased timeout
-        forceResendingToken: _otpRetryCount > 1 ? null : null, // Use resend token if available
-        verificationCompleted: (PhoneAuthCredential credential) async {
-          print("Auto-verification successful");
-          await _signInWithCredential(credential);
-        },
-        verificationFailed: (FirebaseAuthException e) {
-          print("Verification failed: ${e.code} - ${e.message}");
-          if (mounted) {
-            setState(() {
-              switch (e.code) {
-                case 'invalid-phone-number':
-                  _errorMessage = "Invalid phone number format";
-                  break;
-                case 'too-many-requests':
-                  _errorMessage = "Too many attempts. Try again in an hour";
-                  break;
-                case 'quota-exceeded':
-                  _errorMessage = "SMS quota exceeded. Try again later";
-                  break;
-                case 'app-not-authorized':
-                  _errorMessage = "App not authorized for SMS verification";
-                  break;
-                default:
-                  _errorMessage = "SMS service temporarily unavailable (${e.code})";
-              }
-              isLoading = false;
-            });
-          }
-        },
-        codeSent: (String vId, int? resendToken) {
-          print("SMS code sent successfully to $phoneNumber");
-          if (mounted) {
-            setState(() {
-              verificationId = vId;
-              isLoading = false;
-              _otpRetryCount++;
-              _nextStep();
-            });
-            _startResendCountdown();
-          }
-          _showSnackBar(
-              "Verification code sent to $phoneNumber",
-              isError: false
-          );
-        },
-        codeAutoRetrievalTimeout: (String vId) {
-          print("Auto-retrieval timeout for verification ID: $vId");
-          verificationId = vId;
-        },
-      );
+      await Supabase.instance.client.auth.signInWithOtp(phone: phoneNumber);
+      if (mounted) {
+        setState(() {
+          verificationId = phoneNumber; // Supabase verifies by phone + code
+          isLoading = false;
+          _otpRetryCount++;
+          _nextStep();
+        });
+        _startResendCountdown();
+      }
+      _showSnackBar("Verification code sent to $phoneNumber", isError: false);
+    } on AuthException catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = authErrorMessage(e);
+          isLoading = false;
+        });
+      }
+      HapticFeedback.heavyImpact();
     } catch (e) {
       print("❌ Phone verification exception: $e");
       if (mounted) {
@@ -646,18 +610,7 @@ class _CreateAccountScreenState extends State<CreateAccountScreen>
     }
   }
   Future<void> _checkFirebaseConfig() async {
-    try {
-      final app = Firebase.app();
-      print("Firebase app initialized: ${app.name}");
-      print("Firebase options: ${app.options.projectId}");
-
-      // Check if phone auth is enabled
-      final auth = FirebaseAuth.instance;
-      print("Auth instance: ${auth.app.name}");
-
-    } catch (e) {
-      print("Firebase config error: $e");
-    }
+    // Nothing to check: Supabase is initialised in main().
   }
   Future<void> _verifyOTP() async {
     final otp = otpControllers.map((c) => c.text).join();
@@ -681,32 +634,19 @@ class _CreateAccountScreenState extends State<CreateAccountScreen>
     });
 
     try {
-      final credential = PhoneAuthProvider.credential(
-        verificationId: verificationId,
-        smsCode: otp,
-      );
-
-      await _signInWithCredential(credential);
-    } on FirebaseAuthException catch (e) {
+      await Supabase.instance.client.auth
+          .verifyOTP(phone: verificationId, token: otp, type: OtpType.sms);
+      await _afterPhoneSignIn();
+    } on AuthException catch (e) {
       if (mounted) {
         setState(() {
-          switch (e.code) {
-            case 'invalid-verification-code':
-              _errorMessage = "Invalid verification code. Please check and try again.";
-              // Clear OTP fields for retry
-              for (var controller in otpControllers) {
-                controller.clear();
-              }
-              otpFocusNodes[0].requestFocus();
-              break;
-            case 'session-expired':
-              _errorMessage = "Verification session expired. Please request a new code.";
-              break;
-            default:
-              _errorMessage = "Verification failed. Please try again.";
+          _errorMessage = authErrorMessage(e);
+          for (var controller in otpControllers) {
+            controller.clear();
           }
           isLoading = false;
         });
+        otpFocusNodes[0].requestFocus();
       }
       HapticFeedback.heavyImpact();
     } catch (e) {
@@ -735,26 +675,24 @@ class _CreateAccountScreenState extends State<CreateAccountScreen>
     });
 
     try {
-      // Create user with email and password
-      final userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+      // Create the account. The database creates the profile row from this
+      // metadata, and Supabase emails a confirmation link if it is enabled.
+      final response = await Supabase.instance.client.auth.signUp(
         email: emailController.text.trim(),
         password: passwordController.text.trim(),
+        data: {
+          'name': nameController.text.trim(),
+          'phone_number': isPhoneSelected ? '+94${phoneController.text.trim()}' : '',
+        },
       );
 
-      final user = userCredential.user;
+      final user = response.user;
       if (user == null) {
         throw Exception("Failed to create user account - user is null");
       }
 
-      print("✅ User created successfully: ${user.uid}");
-      await _saveUserToFirestore(user);
-
-      try {
-        await user.sendEmailVerification();
-        print("✅ Email verification sent to: ${user.email}");
-      } catch (emailError) {
-        print("⚠️ Failed to send email verification: $emailError");
-      }
+      // With a session (email confirmation off) make sure the profile is complete.
+      if (response.session != null) await _saveProfile();
 
       if (mounted) {
         setState(() => isLoading = false);
@@ -767,39 +705,12 @@ class _CreateAccountScreenState extends State<CreateAccountScreen>
         }
       }
 
-    } on FirebaseAuthException catch (e) {
+    } on AuthException catch (e) {
       if (!mounted) return;
-
       setState(() {
         isLoading = false;
-        switch (e.code) {
-          case 'email-already-in-use':
-            _errorMessage = "This email is already registered. Try signing in instead.";
-            break;
-          case 'weak-password':
-            _errorMessage = "Password is too weak. Please choose a stronger password.";
-            break;
-          case 'invalid-email':
-            _errorMessage = "Invalid email format. Please check your email address.";
-            break;
-          case 'operation-not-allowed':
-            _errorMessage = "Email/password accounts are not enabled. Please contact support.";
-            break;
-          case 'network-request-failed':
-            _errorMessage = "Network error. Please check your internet connection.";
-            break;
-          case 'too-many-requests':
-            _errorMessage = "Too many requests. Please try again later.";
-            break;
-          case 'user-disabled':
-            _errorMessage = "This account has been disabled. Please contact support.";
-            break;
-          default:
-            _errorMessage = e.message ?? "An authentication error occurred.";
-        }
+        _errorMessage = authErrorMessage(e);
       });
-
-      print("🚨 Firebase Auth Error: ${e.code} - ${e.message}");
       HapticFeedback.heavyImpact();
 
     } catch (e) {
@@ -815,79 +726,25 @@ class _CreateAccountScreenState extends State<CreateAccountScreen>
     }
   }
 
-  Future<void> _saveUserToFirestore(User user) async {
+  /// Completes the signed-in user's profile row (created by a database trigger).
+  Future<void> _saveProfile() async {
+    final client = Supabase.instance.client;
+    final user = client.auth.currentUser;
+    if (user == null) return;
     try {
-      final userData = {
-        'uid': user.uid,
+      await client.from('profiles').update({
         'name': nameController.text.trim(),
-        'email': user.email ?? emailController.text.trim(),
-        'phone': isPhoneSelected ? '+94${phoneController.text.trim()}' : '',
-        'role': _selectedRole,
-        'profileImageUrl': '',
-        'emailVerified': user.emailVerified,
-        'preferences': {
-          'darkMode': _isDarkMode,
-          'notifications': true,
-          'language': 'en',
-        },
-        'metadata': {
-          'signUpMethod': isPhoneSelected ? 'phone' : 'email',
-          'platform': 'android',
-        },
-        'createdAt': FieldValue.serverTimestamp(),
-        'lastLoginAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      };
-
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set(userData, SetOptions(merge: true));
-
-      print("✅ User data saved to Firestore successfully for UID: ${user.uid}");
-
+        if (isPhoneSelected) 'phone_number': '+94${phoneController.text.trim()}',
+        if (emailController.text.trim().isNotEmpty) 'email': emailController.text.trim(),
+      }).eq('id', user.id);
     } catch (e) {
-      print("❌ Failed to save user data to Firestore: $e");
-
-      try {
-        await _retryFirestoreSave(user);
-      } catch (retryError) {
-        print("❌ Retry also failed: $retryError");
-      }
+      print("Failed to save profile: $e");
     }
   }
 
-  Future<void> _retryFirestoreSave(User user) async {
-    print("🔄 Retrying Firestore save with minimal data...");
-
-    await Future.delayed(const Duration(seconds: 2));
-
-    final minimalUserData = {
-      'uid': user.uid,
-      'email': user.email ?? emailController.text.trim(),
-      'name': nameController.text.trim(),
-      'role': _selectedRole,
-      'createdAt': FieldValue.serverTimestamp(),
-    };
-
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .set(minimalUserData, SetOptions(merge: true));
-
-    print("✅ Minimal user data saved successfully");
-  }
-
-  Future<void> _signInWithCredential(PhoneAuthCredential credential) async {
+  Future<void> _afterPhoneSignIn() async {
     try {
-      final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
-
-      final user = userCredential.user;
-      if (user == null) {
-        throw Exception("Failed to sign in with phone - user is null");
-      }
-
-      await _saveUserToFirestore(user);
+      await _saveProfile();
 
       if (mounted) {
         setState(() => isLoading = false);
@@ -898,38 +755,11 @@ class _CreateAccountScreenState extends State<CreateAccountScreen>
           Navigator.pushReplacementNamed(context, '/home');
         }
       }
-    } on FirebaseAuthException catch (e) {
-      print("❌ Phone Auth Error: ${e.code} - ${e.message}");
-      if (mounted) {
-        setState(() {
-          switch (e.code) {
-            case 'invalid-verification-code':
-              _errorMessage = "Invalid verification code. Please check and try again.";
-              break;
-            case 'user-disabled':
-              _errorMessage = "This account has been disabled. Please contact support.";
-              break;
-            case 'credential-already-in-use':
-              _errorMessage = "This phone number is already registered. Please sign in instead.";
-              break;
-            case 'session-expired':
-              _errorMessage = "Verification session expired. Please request a new code.";
-              break;
-            case 'network-request-failed':
-              _errorMessage = "Network error. Please check your internet connection.";
-              break;
-            default:
-              _errorMessage = "Authentication failed: ${e.message ?? e.code}";
-          }
-          isLoading = false;
-        });
-      }
-      HapticFeedback.heavyImpact();
     } catch (e) {
-      print("❌ Unexpected Phone Auth Error: $e");
+      print("Unexpected phone sign-in error: $e");
       if (mounted) {
         setState(() {
-          _errorMessage = "Unexpected error during authentication: ${e.toString()}. Please try again.";
+          _errorMessage = "Authentication failed. Please try again.";
           isLoading = false;
         });
       }

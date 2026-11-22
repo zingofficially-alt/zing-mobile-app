@@ -1,4 +1,14 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:zing/Modal/types.dart';
+
+export 'package:zing/Modal/types.dart';
+
+SupabaseClient get _db => Supabase.instance.client;
+
+/// PostgREST select string that loads a store with everything the UI shows.
+const String kStoreSelect =
+    '*, products(*), store_videos(*), store_ratings(user_id, rating), '
+    'owner:profiles!owner_id(id, name, email, phone_number, profile_image_url)';
 
 // Helper to sanitize image URLs - removes placeholder URLs
 String _sanitizeImageUrl(String? url) {
@@ -7,8 +17,10 @@ String _sanitizeImageUrl(String? url) {
   return url;
 }
 
+double? _num(dynamic v) => v == null ? null : (v as num).toDouble();
+
 class CustomUser {
-  String id; // Firebase Authentication UID
+  String id; // Supabase auth user id (uuid)
   String name;
   String email;
   String phoneNumber;
@@ -16,10 +28,10 @@ class CustomUser {
   String profileImageUrl;
   bool storeAccess;
   String role;
-  bool? hasPaid; // Add this field to track payment status
+  bool? hasPaid;
   Store? store; // Optional Store property for users with the role 'Owner'
   List<String>? favorites;
-  List<Payment>? payments; // Add payments field
+  List<Payment>? payments;
 
   CustomUser({
     this.hasPaid,
@@ -27,37 +39,33 @@ class CustomUser {
     required this.name,
     required this.email,
     required this.phoneNumber,
-    this.storeAccess =false,
+    this.storeAccess = false,
     this.address = '',
     this.profileImageUrl = '',
-    this.role ='User',
+    this.role = 'User',
     this.store,
     this.favorites = const [],
-    this.payments = const [], // Initialize an empty list of payments
+    this.payments = const [],
   });
-// Add a favorite store
+
   void addFavorite(String storeId) {
     if (!favorites!.contains(storeId)) {
       favorites!.add(storeId);
     }
   }
 
-  // Remove a favorite store
   void removeFavorite(String storeId) {
     favorites!.remove(storeId);
   }
+
   Future<List<Payment>> fetchPayments() async {
     try {
-      // Query the 'payments' subcollection for this user
-      QuerySnapshot<Map<String, dynamic>> snapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(id)
-          .collection('payments')
-          .get();
-
-      // Parse the payments using fromMap
-      payments = snapshot.docs.map((doc) => Payment.fromMap(doc.data())).toList();
-
+      final rows = await _db
+          .from('payments')
+          .select()
+          .eq('user_id', id)
+          .order('paid_at', ascending: false);
+      payments = (rows as List).map((r) => Payment.fromRow(r)).toList();
       return payments!;
     } catch (e) {
       print('Error fetching payments: $e');
@@ -65,43 +73,58 @@ class CustomUser {
     }
   }
 
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'name': name,
-      'email': email,
-      'storeAccess':storeAccess,
-      'hasPaid': hasPaid ?? false,
-      'phoneNumber': phoneNumber,
-      'address': address,
-      'profileImageUrl': profileImageUrl,
-      'role': role,
-      'store': store?.toMap(),
-      'favorites': favorites ?? [],
-      'payments': payments?.map((payment) => payment.toMap()).toList() ?? [],
-    };
-  }
+  /// Columns of the `profiles` table (role/store_access/has_paid are only
+  /// accepted from admins; a database trigger ignores them otherwise).
+  Map<String, dynamic> toRow() => {
+        'id': id,
+        'name': name,
+        'email': email,
+        'phone_number': phoneNumber,
+        'address': address,
+        'profile_image_url': profileImageUrl,
+        'role': role,
+        'store_access': storeAccess,
+        'has_paid': hasPaid ?? false,
+      };
 
-  factory CustomUser.fromDocument(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data() ?? {};
+  /// Kept for code that serialises a user snapshot (e.g. order details).
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'name': name,
+        'email': email,
+        'storeAccess': storeAccess,
+        'hasPaid': hasPaid ?? false,
+        'phoneNumber': phoneNumber,
+        'address': address,
+        'profileImageUrl': profileImageUrl,
+        'role': role,
+        'favorites': favorites ?? [],
+      };
+
+  /// Builds a user from a `profiles` row. [store] and [favorites] come from
+  /// related tables and are optional.
+  factory CustomUser.fromRow(
+    Map<String, dynamic> r, {
+    Store? store,
+    List<String>? favorites,
+    List<Payment>? payments,
+  }) {
     return CustomUser(
-      id: doc.id,
-      name: data['name'] ?? '',
-      email: data['email'] ?? '',
-      storeAccess: data['storeAccess'] ?? false,
-      phoneNumber: data['phoneNumber'] ?? '',
-      address: data['address'] ?? '',
-      profileImageUrl: data['profileImageUrl'] ?? '',
-      role: data['role'] ?? 'User',
-      hasPaid: data['hasPaid'] ?? false,
-      store: data['store'] != null ? Store.fromMap(data['store']) : null,
-      favorites: List<String>.from(data['favorites'] ?? []),
-      payments: (data['payments'] as List<dynamic>?)
-          ?.map((payment) => Payment.fromMap(payment))
-          .toList() ??
-          [],
+      id: r['id'] ?? '',
+      name: r['name'] ?? '',
+      email: r['email'] ?? '',
+      phoneNumber: r['phone_number'] ?? '',
+      address: r['address'] ?? '',
+      profileImageUrl: r['profile_image_url'] ?? '',
+      role: r['role'] ?? 'User',
+      storeAccess: r['store_access'] ?? false,
+      hasPaid: r['has_paid'] ?? false,
+      store: store,
+      favorites: favorites ?? [],
+      payments: payments ?? [],
     );
   }
+
   factory CustomUser.fromMap(Map<String, dynamic> data) {
     return CustomUser(
       id: data['id'] ?? '',
@@ -113,34 +136,28 @@ class CustomUser {
       profileImageUrl: data['profileImageUrl'] ?? '',
       role: data['role'] ?? 'User',
       hasPaid: data['hasPaid'] ?? false,
-      store: data['store'] != null ? Store.fromMap(data['store']) : null,
       favorites: List<String>.from(data['favorites'] ?? []),
-      payments: (data['payments'] as List<dynamic>?)
-          ?.map((payment) => Payment.fromMap(payment))
-          .toList() ??
-          [],
     );
   }
 }
 
 class Store {
-  String? id; // Store unique ID
+  String? id; // Store unique ID (uuid)
   double? registrationsAmount;
-  final String name; // Store name
-  final String description; // Store description
-  List<Rating> ratings; // Store rating (now it's a list of `Rating` objects)
-  final String category; // Store category (e.g., Asian, Burgers)
-  final String imageUrl; // Store image URL
+  final String name;
+  final String description;
+  List<Rating> ratings;
+  final String category;
+  final String imageUrl;
   final List<Product> products;
-  final List<Order>? orders; // List of store orders
-  final Owner owner; // Store owner's details
-  final GeoPoint location; // GeoPoint to store latitude and longitude
+  final List<Order>? orders;
+  final Owner owner;
+  final GeoPoint location;
   final bool isFavourite;
   final String phoneNumber;
-  List<YouTubeVideo>? videos; // Favourite status
-  List<String>? deliveryOptions; // New field for delivery options
-  double? deliveryCost; // New field for delivery cost (for Store Delivery)
-
+  List<YouTubeVideo>? videos;
+  List<String>? deliveryOptions;
+  double? deliveryCost;
 
   Store({
     required this.phoneNumber,
@@ -157,144 +174,113 @@ class Store {
     this.isFavourite = false,
     this.orders,
     this.videos = const [],
-    this.deliveryOptions = const [], // Default to 'Store Pickup'
-    this.deliveryCost, // Optional delivery cost
+    this.deliveryOptions = const [],
+    this.deliveryCost,
   });
-// Add this function in your Store model
+
   Future<double> getAverageRating() async {
-    // Check if store ID is valid before querying
-    if (this.id == null || this.id!.isEmpty) {
-      print('Cannot fetch ratings: Store ID is null or empty');
-      return 0.0;
-    }
-
+    if (id == null || id!.isEmpty) return 0.0;
     try {
-      QuerySnapshot ratingsSnapshot = await FirebaseFirestore.instance
-          .collection('stores')
-          .doc(this.id)
-          .collection('ratings')
-          .get();
-
-      if (ratingsSnapshot.docs.isNotEmpty) {
-        double total = 0;
-        int count = ratingsSnapshot.docs.length;
-
-        for (var doc in ratingsSnapshot.docs) {
-          total += (doc['rating'] ?? 0.0) as double;
-        }
-
-        return total / count;
-      } else {
-        return 0.0; // No ratings yet
-      }
+      final rows =
+          await _db.from('store_rating_summary').select('avg_rating').eq('store_id', id!);
+      if ((rows as List).isEmpty) return 0.0;
+      return _num(rows.first['avg_rating']) ?? 0.0;
     } catch (e) {
       print('Error fetching ratings: $e');
       return 0.0;
     }
   }
 
-
-  // Submit rating method
-  // Add this function in your Store model
   Future<void> submitRating(String userId, double rating) async {
-    // Check if store ID is valid before submitting
-    if (this.id == null || this.id!.isEmpty) {
+    if (id == null || id!.isEmpty) {
       print('Cannot submit rating: Store ID is null or empty');
       return;
     }
-
     try {
-      // Assuming you have a 'ratings' subcollection in your store's document
-      await FirebaseFirestore.instance
-          .collection('stores')
-          .doc(this.id)
-          .collection('ratings')
-          .doc(userId) // Each user can only rate once
-          .set({
+      await _db.from('store_ratings').upsert({
+        'store_id': id,
+        'user_id': userId, // each user can rate a store once
         'rating': rating,
-        'timestamp': FieldValue.serverTimestamp(),
       });
-
-      print('Rating submitted successfully');
     } catch (e) {
       print('Error submitting rating: $e');
     }
   }
 
-  // Check if user has rated (async version for Firestore check)
   Future<bool> userHasRated(String userId) async {
-    // Check if store ID is valid
-    if (this.id == null || this.id!.isEmpty) {
-      print('Cannot check if user has rated: Store ID is null or empty');
-      return false;
-    }
-
+    if (id == null || id!.isEmpty) return false;
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('stores')
-          .doc(this.id)
-          .collection('ratings')
-          .doc(userId)
-          .get();
-      return doc.exists;
+      final row = await _db
+          .from('store_ratings')
+          .select('user_id')
+          .eq('store_id', id!)
+          .eq('user_id', userId)
+          .maybeSingle();
+      return row != null;
     } catch (e) {
       print('Error checking if user has rated: $e');
       return false;
     }
   }
 
-  // Convert Store object to a map for Firestore
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'registrationAmount': registrationsAmount,
-      'phoneNumber': phoneNumber,
-      'name': name,
-      'description': description,
-      'category': category,
-      'imageUrl': imageUrl,
-      'products': products.map((product) => product.toMap()).toList(),
-      'owner': owner.toMap(),
-      'location': location,
-      'isFavourite': isFavourite,
-      'videos': videos?.map((video) => video.toMap()).toList(),
-      'deliveryOptions': deliveryOptions,
-      'deliveryCost': deliveryCost,
-    };
-  }
+  /// Columns of the `stores` table. Products, videos and ratings live in
+  /// their own tables and are written separately.
+  Map<String, dynamic> toRow() => {
+        if (id != null && id!.isNotEmpty) 'id': id,
+        'owner_id': owner.id,
+        'name': name,
+        'description': description,
+        'category': category,
+        'image_url': imageUrl,
+        'phone_number': phoneNumber,
+        'latitude': location.latitude,
+        'longitude': location.longitude,
+        'registration_amount': registrationsAmount,
+        'delivery_options': deliveryOptions ?? [],
+        'delivery_cost': deliveryCost,
+      };
 
-
-  // Create a Store object from a DocumentSnapshot
-  static Store fromMap(Map<String, dynamic> data) {
+  /// Builds a store from a row loaded with [kStoreSelect].
+  static Store fromRow(Map<String, dynamic> r) {
+    final ownerRow = (r['owner'] as Map<String, dynamic>?) ?? const {};
     return Store(
-      id: data['id'],
-      phoneNumber: data['phoneNumber'] ?? '',
-      name: data['name'] ?? '',
-      registrationsAmount: data['registrationAmount'],
-      description: data['description'] ?? '',
-      ratings: (data['ratings'] as List<dynamic>?)
-          ?.map((ratingMap) => Rating.fromMap(ratingMap))
-          .toList() ??
-          [],
-      category: data['category'] ?? '',
-      imageUrl: _sanitizeImageUrl(data['imageUrl']),
-      products: (data['products'] as List<dynamic>?)
-          ?.map((productMap) => Product.fromMap(productMap))
-          .toList() ??
-          [],
-      owner: Owner.fromMap(data['owner']),
-      location: data['location'],
-      isFavourite: data['isFavourite'] ?? false,
-      videos: (data['videos'] as List<dynamic>?)
-          ?.map((videoMap) => YouTubeVideo.fromMap(videoMap))
-          .toList() ??
-          [],
-      deliveryOptions: data['deliveryOptions'] != null
-          ? (data['deliveryOptions'] as List<dynamic>).map((item) => item as String).toList()
-          : [],
-      deliveryCost: data['deliveryCost']?.toDouble(),
+      id: r['id'],
+      phoneNumber: r['phone_number'] ?? '',
+      name: r['name'] ?? '',
+      registrationsAmount: _num(r['registration_amount']),
+      description: r['description'] ?? '',
+      ratings: ((r['store_ratings'] as List?) ?? [])
+          .map((m) => Rating.fromRow(m as Map<String, dynamic>))
+          .toList(),
+      category: r['category'] ?? '',
+      imageUrl: _sanitizeImageUrl(r['image_url']),
+      products: ((r['products'] as List?) ?? [])
+          .map((m) => Product.fromRow(m as Map<String, dynamic>))
+          .toList(),
+      owner: Owner.fromRow(ownerRow, fallbackId: r['owner_id'] ?? ''),
+      location: GeoPoint(_num(r['latitude']) ?? 0, _num(r['longitude']) ?? 0),
+      videos: ((r['store_videos'] as List?) ?? [])
+          .map((m) => YouTubeVideo.fromMap(m as Map<String, dynamic>))
+          .toList(),
+      deliveryOptions:
+          ((r['delivery_options'] as List?) ?? []).map((e) => e as String).toList(),
+      deliveryCost: _num(r['delivery_cost']),
     );
   }
+
+  /// Snapshot map (used to embed a store in a notification or order view).
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'registrationAmount': registrationsAmount,
+        'phoneNumber': phoneNumber,
+        'name': name,
+        'description': description,
+        'category': category,
+        'imageUrl': imageUrl,
+        'owner': owner.toMap(),
+        'deliveryOptions': deliveryOptions,
+        'deliveryCost': deliveryCost,
+      };
 }
 
 class Payment {
@@ -316,42 +302,38 @@ class Payment {
     required this.paymentDate,
   });
 
-  // Create Payment from DocumentSnapshot
-  static Payment fromMap(Map<String, dynamic> data)  {
-    return Payment(
-      paymentId: data['paymentId'],
-      amount: data['amount'].toDouble(),
-      currency: data['currency'],
-      items: data['items'],
-      paymentStatus: data['paymentStatus'],
-      paymentDate: data['paymentDate'],
-      storeId: data['storeId'],
-    );
-  }
+  static Payment fromRow(Map<String, dynamic> r) => Payment(
+        paymentId: (r['external_payment_id'] ?? r['id'] ?? '').toString(),
+        amount: _num(r['amount']) ?? 0,
+        currency: r['currency'] ?? '',
+        items: r['items'] ?? '',
+        paymentStatus: r['payment_status'] ?? '',
+        paymentDate: Timestamp.parse(r['paid_at']),
+        storeId: (r['store_id'] ?? '').toString(),
+      );
 
-  Map<String, dynamic> toMap() {
-    return {
-      'paymentId': paymentId,
-      'amount': amount,
-      'currency': currency,
-      'items': items,
-      'paymentStatus': paymentStatus,
-      'paymentDate': paymentDate,
-      'storeId':storeId,
-    };
-  }
+  Map<String, dynamic> toRow(String userId) => {
+        'user_id': userId,
+        'store_id': storeId.isEmpty ? null : storeId,
+        'external_payment_id': paymentId.isEmpty ? null : paymentId,
+        'amount': amount,
+        'currency': currency,
+        'items': items,
+        'payment_status': paymentStatus,
+        'paid_at': paymentDate.toIso(),
+      };
 }
 
 class Product {
-  String id = ''; // Product ID
-  final String name; // Product name
-  final String? description; // Product description
-  final double price; // Product price
-  final double? rating; // Product rating
-  final String? imageUrl; // Product image URL
-  final bool isAvailable; // Availability status
-  final double? discount; // Discount percentage (nullable)
-  final int quantity; // Product quantity in stock
+  String id = '';
+  final String name;
+  final String? description;
+  final double price;
+  final double? rating;
+  final String? imageUrl;
+  final bool isAvailable;
+  final double? discount;
+  final int quantity;
 
   Product({
     required this.id,
@@ -360,49 +342,69 @@ class Product {
     required this.price,
     this.rating,
     this.imageUrl,
-    this.isAvailable = true, // Default availability
-    this.discount, // Optional field, default is null
-    this.quantity = 0, // Default quantity is 0
+    this.isAvailable = true,
+    this.discount,
+    this.quantity = 0,
   });
 
-  // Convert Product object to a map for Firestore
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'name': name,
-      'description': description,
-      'price': price,
-      'rating': rating,
-      'imageUrl': imageUrl,
-      'isAvailable': isAvailable,
-      'discount': discount,
-      'quantity': quantity,
-    };
-  }
+  /// Columns of the `products` table.
+  Map<String, dynamic> toRow(String storeId) => {
+        if (id.isNotEmpty) 'id': id,
+        'store_id': storeId,
+        'name': name,
+        'description': description,
+        'price': price,
+        'rating': rating,
+        'image_url': imageUrl,
+        'is_available': isAvailable,
+        'discount': discount,
+        'quantity': quantity,
+      };
 
-  // Create a Product object from a map
-  static Product fromMap(Map<String, dynamic> map) {
-    return Product(
-      id: map['id'] ?? '',
-      name: map['name'] ?? '',
-      description: map['description'] ?? '',
-      price: map['price']?.toDouble() ?? 0.0,
-      rating: map['rating']?.toDouble() ?? 0.0,
-      imageUrl: _sanitizeImageUrl(map['imageUrl']),
-      isAvailable: map['isAvailable'] ?? true,
-      discount: map['discount']?.toDouble(),
-      quantity: map['quantity'] ?? 0,
-    );
-  }
+  static Product fromRow(Map<String, dynamic> r) => Product(
+        id: r['id'] ?? '',
+        name: r['name'] ?? '',
+        description: r['description'] ?? '',
+        price: _num(r['price']) ?? 0.0,
+        rating: _num(r['rating']) ?? 0.0,
+        imageUrl: _sanitizeImageUrl(r['image_url']),
+        isAvailable: r['is_available'] ?? true,
+        discount: _num(r['discount']),
+        quantity: r['quantity'] ?? 0,
+      );
 
+  /// Snapshot map (order line items).
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'name': name,
+        'description': description,
+        'price': price,
+        'rating': rating,
+        'imageUrl': imageUrl,
+        'isAvailable': isAvailable,
+        'discount': discount,
+        'quantity': quantity,
+      };
+
+  static Product fromMap(Map<String, dynamic> map) => Product(
+        id: map['id'] ?? '',
+        name: map['name'] ?? '',
+        description: map['description'] ?? '',
+        price: map['price']?.toDouble() ?? 0.0,
+        rating: map['rating']?.toDouble() ?? 0.0,
+        imageUrl: _sanitizeImageUrl(map['imageUrl']),
+        isAvailable: map['isAvailable'] ?? true,
+        discount: map['discount']?.toDouble(),
+        quantity: map['quantity'] ?? 0,
+      );
 }
 
 class Owner {
-  final String id; // Owner ID
-  final String name; // Owner name
-  final String email; // Owner email
-  final String phone; // Owner phone
-  final String profileImageUrl; // Owner profile picture
+  final String id;
+  final String name;
+  final String email;
+  final String phone;
+  final String profileImageUrl;
 
   Owner({
     required this.id,
@@ -412,27 +414,30 @@ class Owner {
     required this.profileImageUrl,
   });
 
-  // Convert Owner object to a map for Firestore
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'name': name,
-      'email': email,
-      'phone': phone,
-      'profileImageUrl': profileImageUrl,
-    };
-  }
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'name': name,
+        'email': email,
+        'phone': phone,
+        'profileImageUrl': profileImageUrl,
+      };
 
-  // Create an Owner object from a map
-  static Owner fromMap(Map<String, dynamic> map) {
-    return Owner(
-      id: map['id'] ?? '',
-      name: map['name'] ?? '',
-      email: map['email'] ?? '',
-      phone: map['phone'] ?? '',
-      profileImageUrl: _sanitizeImageUrl(map['profileImageUrl']),
-    );
-  }
+  static Owner fromMap(Map<String, dynamic> map) => Owner(
+        id: map['id'] ?? '',
+        name: map['name'] ?? '',
+        email: map['email'] ?? '',
+        phone: map['phone'] ?? '',
+        profileImageUrl: _sanitizeImageUrl(map['profileImageUrl']),
+      );
+
+  /// From the `owner:profiles!owner_id(...)` embed of [kStoreSelect].
+  static Owner fromRow(Map<String, dynamic> r, {String fallbackId = ''}) => Owner(
+        id: r['id'] ?? fallbackId,
+        name: r['name'] ?? '',
+        email: r['email'] ?? '',
+        phone: r['phone_number'] ?? '',
+        profileImageUrl: _sanitizeImageUrl(r['profile_image_url']),
+      );
 }
 
 class Rating {
@@ -441,125 +446,112 @@ class Rating {
 
   Rating({required this.userId, required this.score});
 
-  Map<String, dynamic> toMap() {
-    return {
-      'userId': userId,
-      'score': score,
-    };
-  }
+  Map<String, dynamic> toMap() => {'userId': userId, 'score': score};
 
-  static Rating fromMap(Map<String, dynamic> map) {
-    return Rating(
-      userId: map['userId'] ?? '',
-      score: map['score']?.toDouble() ?? 0.0,
-    );
-  }
+  static Rating fromMap(Map<String, dynamic> map) => Rating(
+        userId: map['userId'] ?? '',
+        score: map['score']?.toDouble() ?? 0.0,
+      );
+
+  static Rating fromRow(Map<String, dynamic> r) =>
+      Rating(userId: r['user_id'] ?? '', score: _num(r['rating']) ?? 0.0);
 }
 
+/// Placeholder kept for the unused `Store.orders` field.
+class Order {}
+
 class Orders {
-  String id; // Order ID
+  String id;
   String userId;
-  String storeId; // The user who placed the order
-  List<Product> products; // List of products in the order
-  double totalPrice; // Total price of the order
-  String status; // Order status (e.g., Pending, Processed, Shipped, Delivered)
+  String storeId;
+  List<Product> products;
+  double totalPrice;
+  String status; // Pending, Processed, Shipped, Delivered
   Timestamp placedAt;
   String deliveryMethod;
   CustomUser? userDetails;
-  Store? storeDetails;// The timestamp when the order was placed
+  Store? storeDetails;
 
   Orders({
-    this.id = '', // Empty ID initially, Firestore will generate this
+    this.id = '',
     required this.userId,
     required this.storeId,
     required this.products,
     required this.totalPrice,
-    this.status = 'Pending', // Default status
+    this.status = 'Pending',
     required this.placedAt,
     required this.deliveryMethod,
     this.userDetails,
-    this.storeDetails
+    this.storeDetails,
   });
 
-  // Convert Order object to a map for Firestore
-  Map<String, dynamic> toMap() {
-    return {
-      'userId': userId,
-      'storeId': storeId,
-      'products': products.map((product) => product.toMap()).toList(),
-      'totalPrice': totalPrice,
-      'status': status,
-      'placedAt': placedAt,
-      'deliveryMethod':deliveryMethod,
-      'userDetails':userDetails,
+  /// Select string for loading an order with its line items and buyer.
+  static const String select =
+      '*, order_items(*), buyer:profiles!user_id(id, name, email, phone_number, '
+      'address, profile_image_url, role)';
 
-    };
-  }
+  /// Columns of the `orders` table (line items are written to `order_items`).
+  Map<String, dynamic> toRow() => {
+        'user_id': userId,
+        'store_id': storeId,
+        'total_price': totalPrice,
+        'status': status,
+        'placed_at': placedAt.toIso(),
+        'delivery_method': deliveryMethod,
+      };
 
-  // Create an Order object from a DocumentSnapshot
-  // Create an Order object from a DocumentSnapshot
-  factory Orders.fromDocument(DocumentSnapshot<Object?> doc) {
-    if (doc.data() == null) {
-      throw Exception("Document data is null for doc ID: ${doc.id}");
-    }
+  List<Map<String, dynamic>> itemRows(String orderId) => products
+      .map((p) => {
+            'order_id': orderId,
+            'product_id': p.id.isEmpty ? null : p.id,
+            'name': p.name,
+            'price': p.price,
+            'image_url': p.imageUrl,
+            'quantity': p.quantity,
+          })
+      .toList();
 
-    final data = doc.data() as Map<String, dynamic>;
-
+  /// Builds an order from a row loaded with [Orders.select].
+  factory Orders.fromRow(Map<String, dynamic> r) {
+    final buyer = r['buyer'] as Map<String, dynamic>?;
     return Orders(
-      id: doc.id,
-      userId: data['userId'] ?? '',
-      storeId: data['storeId'] ?? '',
-      products: (data['products'] as List<dynamic>? ?? [])
-          .map((productMap) => Product.fromMap(productMap))
+      id: r['id'] ?? '',
+      userId: r['user_id'] ?? '',
+      storeId: r['store_id'] ?? '',
+      products: ((r['order_items'] as List?) ?? [])
+          .map((i) => Product(
+                id: (i['product_id'] ?? '').toString(),
+                name: i['name'] ?? '',
+                price: _num(i['price']) ?? 0,
+                imageUrl: _sanitizeImageUrl(i['image_url']),
+                quantity: i['quantity'] ?? 1,
+              ))
           .toList(),
-      totalPrice: (data['totalPrice'] as num?)?.toDouble() ?? 0.0,
-      status: data['status'] ?? 'Pending',
-      placedAt: data['placedAt'] is Timestamp
-          ? data['placedAt'] as Timestamp
-          : Timestamp.now(), // Default to current timestamp if missing
-      deliveryMethod: data['deliveryMethod'] ?? 'Unknown',
-      userDetails: data['userDetails'] != null
-          ? CustomUser.fromMap(data['userDetails'] as Map<String, dynamic>)
-          : null,
-      storeDetails: data['storeDetails'] != null
-          ? Store.fromMap(data['storeDetails'] as Map<String, dynamic>)
-          : null,
+      totalPrice: _num(r['total_price']) ?? 0.0,
+      status: r['status'] ?? 'Pending',
+      placedAt: Timestamp.parse(r['placed_at']),
+      deliveryMethod: r['delivery_method'] ?? 'Unknown',
+      userDetails: buyer != null ? CustomUser.fromRow(buyer) : null,
     );
   }
 
-  // Update order status
   Future<void> updateStatus(String storeId, String newStatus) async {
     try {
-      await FirebaseFirestore.instance
-          .collection('stores')
-          .doc(storeId)
-          .collection('orders')
-          .doc(id)
-          .update({'status': newStatus});
+      await _db.from('orders').update({'status': newStatus}).eq('id', id);
     } catch (e) {
-      print("Error updating order status: $e");
+      print('Error updating order status: $e');
     }
   }
 }
+
 class YouTubeVideo {
   String id;
-  String url; // The YouTube URL
+  String url;
 
   YouTubeVideo({required this.id, required this.url});
 
-  // Convert the YouTubeVideo object to a map for Firestore
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'url': url,
-    };
-  }
+  Map<String, dynamic> toMap() => {'id': id, 'url': url};
 
-  // Create a YouTubeVideo object from a map
-  static YouTubeVideo fromMap(Map<String, dynamic> map) {
-    return YouTubeVideo(
-      id: map['id'] ?? '',
-      url: map['url'] ?? '',
-    );
-  }
+  static YouTubeVideo fromMap(Map<String, dynamic> map) =>
+      YouTubeVideo(id: (map['id'] ?? '').toString(), url: map['url'] ?? '');
 }

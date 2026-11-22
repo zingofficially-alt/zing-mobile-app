@@ -98,8 +98,6 @@ class _ManageUsersPageState extends State<ManageUsersPage> with TickerProviderSt
     print("Role distribution: $roleCount");
     print("=== END UI DEBUG ===");
 
-    // Also trigger provider debug
-    userProvider.debugFirestoreData();
   }
 
   @override

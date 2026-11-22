@@ -1,64 +1,57 @@
 import 'dart:async';
 
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:zing/Modal/CoustomUser.dart';
-import 'package:cloud_functions/cloud_functions.dart';
+import 'package:zing/Service/ApiClient.dart';
 
 class CustomUserProvider with ChangeNotifier {
   CustomUser? currentUser;
   bool _isLoading = false;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
   List<Payment> _payments = [];
   List<Payment> get payments => _payments;
   CustomUser? get user => currentUser;
   bool get isLoading => _isLoading;
   List<CustomUser> _users = [];
-
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseStorage _storage = FirebaseStorage.instance;
-
   List<CustomUser> get users => _users;
 
-  // Live listener on the whole users collection. Only admins may run it
-  // (Firestore rules deny listing users to everyone else).
-  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _usersSub;
-  StreamSubscription<User?>? _authSub;
+  SupabaseClient get _db => Supabase.instance.client;
+  GoTrueClient get _auth => _db.auth;
+
+  // Live stream of the profiles table, used by the admin screens.
+  StreamSubscription<List<Map<String, dynamic>>>? _usersSub;
+  StreamSubscription<AuthState>? _authSub;
 
   CustomUserProvider() {
     _initializeUser();
   }
 
+  void _notifyLater() {
+    // Post-frame callback prevents semantics assertion errors during navigation.
+    WidgetsBinding.instance.addPostFrameCallback((_) => notifyListeners());
+  }
+
   Future<void> updatePaymentStatusAndStoreAccess(CustomUser user, bool accessStatus) async {
     try {
-      // Update `storeAccess` field
       user.storeAccess = accessStatus;
 
-      // Fetch the latest payment record and update it
-      QuerySnapshot<Map<String, dynamic>> snapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.id)
-          .collection('payments')
-          .orderBy('paymentDate', descending: true)
-          .limit(1)
-          .get();
-
-      if (snapshot.docs.isNotEmpty) {
-        var paymentDoc = snapshot.docs.first;
-        // Update the payment document with current payment status and the current date
-        await paymentDoc.reference.update({
-          'paymentStatus': 'Completed',
-          'paymentDate': FieldValue.serverTimestamp(), // Sets the current timestamp in Firestore
-        });
+      // Mark the latest payment as completed.
+      final latest = await _db
+          .from('payments')
+          .select('id')
+          .eq('user_id', user.id)
+          .order('paid_at', ascending: false)
+          .limit(1);
+      if ((latest as List).isNotEmpty) {
+        await _db.from('payments').update({
+          'payment_status': 'Completed',
+          'paid_at': DateTime.now().toUtc().toIso8601String(),
+        }).eq('id', latest.first['id']);
       }
 
-      // Update Firestore to reflect the changes
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.id)
-          .update({'storeAccess': accessStatus, 'hasPaid': true});
+      await _db
+          .from('profiles')
+          .update({'store_access': accessStatus, 'has_paid': true}).eq('id', user.id);
 
       notifyListeners();
     } catch (e) {
@@ -67,19 +60,15 @@ class CustomUserProvider with ChangeNotifier {
     }
   }
 
-  // Initialize the user data and payments concurrently
   Future<void> _initializeUser() async {
     _isLoading = true;
-    // Use post-frame callback to prevent semantics assertion errors during navigation
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      notifyListeners();
-    });
+    _notifyLater();
 
-    // Load the signed-in user's own data. The full user list is only loaded
-    // for admins; guests and normal users never read other users' documents.
-    _authSub = _auth.authStateChanges().listen((User? firebaseUser) async {
+    // Load the signed-in user's own data; the full user list is admin-only.
+    _authSub = _auth.onAuthStateChange.listen((AuthState state) async {
       try {
-        if (firebaseUser == null) {
+        if (state.session == null) {
+          currentUser = null;
           _stopUsersListener();
           return;
         }
@@ -91,12 +80,10 @@ class CustomUserProvider with ChangeNotifier {
           _stopUsersListener();
         }
       } catch (e) {
-        print("Error during initialization: $e");
+        print('Error during initialization: $e');
       } finally {
         _isLoading = false;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          notifyListeners();
-        });
+        _notifyLater();
       }
     });
   }
@@ -115,221 +102,161 @@ class CustomUserProvider with ChangeNotifier {
   }
 
   void refreshUserData() {
-    fetchUserDataFromFirestore();  // Call to re-fetch data from Firestore
+    fetchUserDetails();
   }
 
-  // Fetch the current logged-in user's details from Firestore
-  Future<void> fetchUserDataFromFirestore() async {
-    User? firebaseUser = _auth.currentUser;
-    if (firebaseUser == null) {
-      print("No user is logged in.");
-      return;
-    }
+  Future<void> fetchUserDataFromFirestore() => fetchUserDetails();
 
-    try {
-      final userRef = FirebaseFirestore.instance.collection('users').doc(firebaseUser.uid);
-      final DocumentSnapshot<Map<String, dynamic>> userDoc = await userRef.get();
-
-      if (userDoc.exists && userDoc.data() != null) {
-        currentUser = CustomUser.fromDocument(userDoc);  // Update the current user
-        // Use post-frame callback to prevent semantics assertion errors during navigation
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          notifyListeners();  // Notify listeners about the data change
-        });
-      } else {
-        print("User data not found.");
-      }
-    } catch (e) {
-      print("Error fetching user details: $e");
-    }
+  Future<List<String>> _favoritesOf(String userId) async {
+    final rows = await _db.from('user_favorites').select('store_id').eq('user_id', userId);
+    return (rows as List).map((r) => r['store_id'] as String).toList();
   }
 
-  // FIXED: Fetch all users from Firestore with proper loading state management
+  Future<Store?> _storeOf(String ownerId) async {
+    final rows = await _db
+        .from('stores')
+        .select(kStoreSelect)
+        .eq('owner_id', ownerId)
+        .order('created_at')
+        .limit(1);
+    if ((rows as List).isEmpty) return null;
+    return Store.fromRow(rows.first);
+  }
+
+  Future<CustomUser?> _loadUser(String userId) async {
+    final row = await _db.from('profiles').select().eq('id', userId).maybeSingle();
+    if (row == null) return null;
+    final favorites = await _favoritesOf(userId);
+    final store = row['role'] == 'Owner' ? await _storeOf(userId) : null;
+    return CustomUser.fromRow(row, store: store, favorites: favorites);
+  }
+
+  /// Loads every profile and keeps the list live. Admins only.
   Future<void> fetchUsers() async {
     if (currentUser?.role != 'Admin') {
-      // Only admins can list users.
       _stopUsersListener();
       return;
     }
-    print("Starting to fetch users...");
     _isLoading = true;
-    // Use post-frame callback to prevent semantics assertion errors during navigation
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      notifyListeners();
-    });
+    _notifyLater();
 
     try {
-      // Use snapshots() to listen for real-time updates
       await _usersSub?.cancel();
-      _usersSub = FirebaseFirestore.instance.collection('users').snapshots().listen((snapshot) {
-        print("Received ${snapshot.docs.length} user documents from Firestore");
-
-        _users = snapshot.docs.map((doc) {
-          try {
-            final userData = doc.data() as Map<String, dynamic>;
-            print("Processing user: ${userData['name']} with role: ${userData['role']}");
-
-            // Create user from document
-            final user = CustomUser.fromDocument(doc);
-
-            // Debug: Print user details
-            print("Created CustomUser - Name: ${user.name}, Role: ${user.role}, ID: ${user.id}");
-
-            return user;
-          } catch (e) {
-            print("Error processing user document ${doc.id}: $e");
-            print("Document data: ${doc.data()}");
-            // Return a placeholder user or skip this user
-            return null;
-          }
-        }).where((user) => user != null).cast<CustomUser>().toList();
-
-        // Debug: Print role distribution
-        final roleCount = <String, int>{};
-        for (final user in _users) {
-          final role = user.role ?? 'No Role';
-          roleCount[role] = (roleCount[role] ?? 0) + 1;
-        }
-        print("Role distribution: $roleCount");
-
-        _isLoading = false; // Set loading to false after data is processed
-        // Use post-frame callback to prevent semantics assertion errors during navigation
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          notifyListeners(); // Notify listeners when data changes
-        });
-      }, onError: (error) {
-        print("Error in users stream: $error");
+      _usersSub = _db.from('profiles').stream(primaryKey: ['id']).listen((rows) {
+        _users = rows.map((r) => CustomUser.fromRow(r)).toList();
         _isLoading = false;
-        // Use post-frame callback to prevent semantics assertion errors
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          notifyListeners();
-        });
+        _notifyLater();
+      }, onError: (error) {
+        print('Error in users stream: $error');
+        _isLoading = false;
+        _notifyLater();
       });
     } catch (e) {
-      print("Error setting up users listener: $e");
+      print('Error setting up users listener: $e');
       _isLoading = false;
-      // Use post-frame callback to prevent semantics assertion errors
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        notifyListeners();
-      });
+      _notifyLater();
     }
   }
 
-  // Fetch payments for the current user
   Future<void> fetchPaymentsForCurrentUser() async {
     if (currentUser == null) {
       print('No current user set.');
       return;
     }
-
     try {
-      final QuerySnapshot<Map<String, dynamic>> paymentsSnapshot =
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser!.id)
-          .collection('payments')
-          .get();
-
-      _payments = paymentsSnapshot.docs.map((doc) {
-        return Payment.fromMap(doc.data());
-      }).toList();
-
-      // Use post-frame callback to prevent semantics assertion errors during navigation
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        notifyListeners();
-      });
+      final rows = await _db
+          .from('payments')
+          .select()
+          .eq('user_id', currentUser!.id)
+          .order('paid_at', ascending: false);
+      _payments = (rows as List).map((r) => Payment.fromRow(r)).toList();
+      _notifyLater();
     } catch (e) {
       print('Error fetching payments: $e');
     }
   }
 
-  // Add payment to the current user's subcollection
   Future<void> addPaymentToCurrentUser(Payment payment) async {
     if (currentUser == null) {
       print('No current user set.');
       return;
     }
-
     try {
-      DocumentReference paymentRef = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser!.id)
-          .collection('payments')
-          .add(payment.toMap());
-
-      payment.paymentId = paymentRef.id;
-
-      // Re-fetch the updated user data
+      final row = await _db
+          .from('payments')
+          .insert(payment.toRow(currentUser!.id))
+          .select('id')
+          .single();
+      payment.paymentId = row['id'] as String;
       await fetchUserDetails();
-
-      print("Payment added successfully and user details updated.");
     } catch (e) {
       print('Error adding payment: $e');
     }
   }
 
-  // Fetch the current logged-in user's details
   Future<CustomUser?> fetchUserDetails() async {
-    User? firebaseUser = _auth.currentUser;
-    if (firebaseUser == null) {
-      print("No user is logged in.");
+    final authUser = _auth.currentUser;
+    if (authUser == null) {
+      print('No user is logged in.');
       return null;
     }
-
     try {
-      final userRef =
-      FirebaseFirestore.instance.collection('users').doc(firebaseUser.uid);
-      final DocumentSnapshot<Map<String, dynamic>> userDoc = await userRef.get();
-
-      if (userDoc.exists && userDoc.data() != null) {
-        currentUser = CustomUser.fromDocument(userDoc);
-        // Use post-frame callback to prevent semantics assertion errors during navigation
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          notifyListeners();
-        });
-        return currentUser;
-      } else {
-        print("User data not found.");
+      final loaded = await _loadUser(authUser.id);
+      if (loaded == null) {
+        print('User data not found.');
         return null;
       }
+      currentUser = loaded;
+      _notifyLater();
+      return currentUser;
     } catch (e) {
-      print("Error fetching user details: $e");
+      print('Error fetching user details: $e');
       return null;
     }
   }
 
-  // Add a store to the current user
+  /// Creates the current user's store. Products and videos are written to
+  /// their own tables.
   Future<void> addStoreToUser(Store newStore) async {
     if (currentUser == null) {
-      print("No current user set.");
+      print('No current user set.');
       return;
     }
-
     try {
-      DocumentReference storeRef =
-      await FirebaseFirestore.instance.collection('stores').add(newStore.toMap());
-      newStore.id = storeRef.id;
+      final row = await _db
+          .from('stores')
+          .insert(newStore.toRow()..['owner_id'] = currentUser!.id)
+          .select('id')
+          .single();
+      final storeId = row['id'] as String;
+      newStore.id = storeId;
 
-      currentUser!.store = newStore;
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser!.id)
-          .update({'store': newStore.toMap()});
+      if (newStore.products.isNotEmpty) {
+        await _db
+            .from('products')
+            .insert(newStore.products.map((p) => p.toRow(storeId)..remove('id')).toList());
+      }
+      final videos = newStore.videos ?? [];
+      if (videos.isNotEmpty) {
+        await _db
+            .from('store_videos')
+            .insert(videos.map((v) => {'store_id': storeId, 'url': v.url}).toList());
+      }
 
+      currentUser!.store = await _storeOf(currentUser!.id) ?? newStore;
       notifyListeners();
     } catch (e) {
-      print("Error adding store to user: $e");
+      print('Error adding store to user: $e');
     }
   }
 
-  // Handle favorite stores
   void addFavoriteStore(String storeId) {
     if (currentUser != null && !currentUser!.favorites!.contains(storeId)) {
       currentUser!.addFavorite(storeId);
-      FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser!.id)
-          .update({'favorites': currentUser!.favorites});
+      _db
+          .from('user_favorites')
+          .upsert({'user_id': currentUser!.id, 'store_id': storeId})
+          .catchError((e) => print('Error adding favorite: $e'));
       notifyListeners();
     }
   }
@@ -337,178 +264,99 @@ class CustomUserProvider with ChangeNotifier {
   void removeFavoriteStore(String storeId) {
     if (currentUser != null && currentUser!.favorites!.contains(storeId)) {
       currentUser!.removeFavorite(storeId);
-      FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser!.id)
-          .update({'favorites': currentUser!.favorites});
+      _db
+          .from('user_favorites')
+          .delete()
+          .eq('user_id', currentUser!.id)
+          .eq('store_id', storeId)
+          .catchError((e) => print('Error removing favorite: $e'));
       notifyListeners();
     }
   }
 
-  // Fetch a user by their user ID
   Future<CustomUser?> fetchUserById(String userId) async {
     try {
-      final DocumentSnapshot<Map<String, dynamic>> userDoc =
-      await FirebaseFirestore.instance.collection('users').doc(userId).get();
-
-      if (userDoc.exists && userDoc.data() != null) {
-        return CustomUser.fromDocument(userDoc);
-      } else {
-        print("User not found for ID: $userId");
-        return null;
-      }
+      return await _loadUser(userId);
     } catch (e) {
-      print("Error fetching user by ID: $e");
+      print('Error fetching user by ID: $e');
       return null;
     }
   }
+
+  Future<CustomUser?> getUserById(String userId) => fetchUserById(userId);
 
   bool isFavoriteStore(String storeId) {
     return currentUser?.favorites!.contains(storeId) ?? false;
   }
 
-  // Monitor authentication state changes
   void monitorAuthState() {
-    _auth.authStateChanges().listen((User? user) {
-      if (user == null) {
-        print("User is currently signed out.");
-        currentUser = null;
-        // Use post-frame callback to prevent semantics assertion errors during navigation
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          notifyListeners();
-        });
-      } else {
-        print("User is signed in.");
-        fetchUserDetails();
-      }
-    });
+    // The provider already listens to auth changes in _initializeUser.
   }
 
-  // Sign out the user
   Future<void> signOut() async {
     try {
-      await FirebaseAuth.instance.signOut();
+      await _auth.signOut();
       currentUser = null;
+      _payments = [];
       _stopUsersListener();
-      // Use post-frame callback to prevent semantics assertion errors during navigation
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        notifyListeners();
-      });
+      _notifyLater();
     } catch (e) {
       print('Error signing out: $e');
     }
   }
 
-  // Save user details in Firestore
+  /// Updates the current user's own profile fields.
   Future<void> saveUserDetails(CustomUser user) async {
     try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.id)
-          .set(user.toMap(), SetOptions(merge: true));
+      final row = user.toRow();
+      // Only admins may change these; the database ignores them otherwise.
+      row.remove('role');
+      row.remove('store_access');
+      row.remove('has_paid');
+      await _db.from('profiles').upsert(row);
       currentUser = user;
-      // Use post-frame callback to prevent semantics assertion errors during navigation
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        notifyListeners();
-      });
+      _notifyLater();
     } catch (e) {
-      print("Error saving user details: $e");
+      print('Error saving user details: $e');
     }
   }
 
+  /// Deletes an account. The Node API removes the auth user and the database
+  /// cascades to the profile, store, products and orders.
   Future<void> deleteUser(String userId, {bool isOwner = false, String? storeId}) async {
-    User? firebaseUser = FirebaseAuth.instance.currentUser;
-    if (firebaseUser != null) {
-      print("User found: ${firebaseUser.uid}");
-      try {
-        // Step 1: Delete the user's store if the user is an owner
-        if (isOwner && storeId != null) {
-          await _deleteStore(storeId);
-        }
-
-        // Step 2: Delete user from Firestore
-        await FirebaseFirestore.instance.collection('users').doc(userId).delete();
-
-        // Step 3: Delete user from Firebase Authentication
-        final HttpsCallable callable = FirebaseFunctions.instance.httpsCallable('deleteUser');
-        await callable.call({
-          "uid": userId,
-        });
-
-        _users.removeWhere((user) => user.id == userId);
-        notifyListeners();
-      } catch (e) {
-        print('Error deleting user: $e');
-      }
-    } else {
-      print("User not found in Firebase Authentication.");
+    if (_auth.currentUser == null) {
+      print('No signed-in user.');
+      return;
     }
-  }
-
-  Future<void> _deleteStore(String storeId) async {
     try {
-      // Step 1: Delete all the products associated with the store
-      QuerySnapshot productsSnapshot = await FirebaseFirestore.instance
-          .collection('stores')
-          .doc(storeId)
-          .collection('products')
-          .get();
-
-      for (var productDoc in productsSnapshot.docs) {
-        await productDoc.reference.delete();
-      }
-
-      // Step 2: Delete the store document from Firestore
-      await FirebaseFirestore.instance.collection('stores').doc(storeId).delete();
-
-      print('Store deleted successfully');
+      await ApiClient.delete('/users/$userId');
+      _users.removeWhere((user) => user.id == userId);
+      notifyListeners();
     } catch (e) {
-      print('Error deleting store: $e');
+      print('Error deleting user: $e');
     }
   }
 
-  // ENHANCED: Add user with proper role validation
+  /// Admin creates an account with a role (the admin stays signed in).
   Future<void> addUser({
     required String email,
     required String password,
     required String name,
     required String phoneNumber,
-    required String role, // Adding role as a required parameter
+    required String role,
   }) async {
     _isLoading = true;
     notifyListeners();
-
     try {
-      print("Creating user with role: $role");
-
-      // Create user in Firebase Authentication
-      UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-
-      // Construct a new CustomUser object
-      CustomUser newUser = CustomUser(
-        id: userCredential.user!.uid,
-        name: name,
-        email: email,
-        phoneNumber: phoneNumber,
-        address: '', // Default values can be changed as needed
-        profileImageUrl: '', // Default profile image (or set your own)
-        role: role, // Role set from input
-      );
-
-      print("Adding user to Firestore with data: ${newUser.toMap()}");
-
-      // Add user details to Firestore
-      await FirebaseFirestore.instance.collection('users').doc(newUser.id).set(newUser.toMap());
-
-      print("User created successfully with ID: ${newUser.id} and role: ${newUser.role}");
-
-      // Set the new user to the provider's state
-      currentUser = newUser;
+      await ApiClient.post('/admin/users', {
+        'email': email,
+        'password': password,
+        'name': name,
+        'phone_number': phoneNumber,
+        'role': role,
+      });
     } catch (e) {
-      print("Error adding new user: $e");
+      print('Error adding new user: $e');
       rethrow;
     } finally {
       _isLoading = false;
@@ -516,114 +364,40 @@ class CustomUserProvider with ChangeNotifier {
     }
   }
 
-  // Fetch a user by their user ID
-  Future<CustomUser?> getUserById(String userId) async {
-    try {
-      final DocumentSnapshot<Map<String, dynamic>> userDoc =
-      await FirebaseFirestore.instance.collection('users').doc(userId).get();
-
-      if (userDoc.exists && userDoc.data() != null) {
-        return CustomUser.fromDocument(userDoc);
-      } else {
-        print("User not found for ID: $userId");
-        return null;
-      }
-    } catch (e) {
-      print("Error fetching user by ID: $e");
-      return null;
-    }
-  }
-
-  // Add admin with explicit role
   Future<void> addAdmin({
     required String email,
     required String password,
     required String name,
     required String phoneNumber,
-  }) async {
-    await addUser(
-      email: email,
-      password: password,
-      name: name,
-      phoneNumber: phoneNumber,
-      role: 'Admin',
-    );
-  }
+  }) =>
+      addUser(email: email, password: password, name: name, phoneNumber: phoneNumber, role: 'Admin');
 
-  // ADDED: Method to add Owner specifically
   Future<void> addOwner({
     required String email,
     required String password,
     required String name,
     required String phoneNumber,
-  }) async {
-    await addUser(
-      email: email,
-      password: password,
-      name: name,
-      phoneNumber: phoneNumber,
-      role: 'Owner',
-    );
-  }
+  }) =>
+      addUser(email: email, password: password, name: name, phoneNumber: phoneNumber, role: 'Owner');
 
-  // ADDED: Method to add regular User specifically
   Future<void> addRegularUser({
     required String email,
     required String password,
     required String name,
     required String phoneNumber,
-  }) async {
-    await addUser(
-      email: email,
-      password: password,
-      name: name,
-      phoneNumber: phoneNumber,
-      role: 'User',
-    );
-  }
+  }) =>
+      addUser(email: email, password: password, name: name, phoneNumber: phoneNumber, role: 'User');
 
-  // Change password for the current user
   Future<void> changePassword(String newPassword) async {
     try {
-      User? user = _auth.currentUser;
-      if (user != null) {
-        await user.updatePassword(newPassword);
-        await user.reload(); // Reload user to apply changes
-        print("Password updated successfully.");
-      } else {
-        print("No user is logged in to change the password.");
+      if (_auth.currentUser == null) {
+        print('No user is logged in to change the password.');
+        return;
       }
+      await _auth.updateUser(UserAttributes(password: newPassword));
     } catch (e) {
-      if (e.toString().contains('requires-recent-login')) {
-        print("Error: The user needs to reauthenticate before changing the password.");
-      } else {
-        print("Error changing password: $e");
-      }
+      print('Error changing password: $e');
       rethrow;
-    }
-  }
-
-  // ADDED: Debug method to check Firestore data
-  Future<void> debugFirestoreData() async {
-    try {
-      print("=== DEBUGGING FIRESTORE USER DATA ===");
-
-      final snapshot = await FirebaseFirestore.instance.collection('users').get();
-      print("Total documents in users collection: ${snapshot.docs.length}");
-
-      for (final doc in snapshot.docs) {
-        final data = doc.data();
-        print("---");
-        print("Document ID: ${doc.id}");
-        print("Name: ${data['name']}");
-        print("Email: ${data['email']}");
-        print("Role: ${data['role']} (Type: ${data['role']?.runtimeType})");
-        print("Full document: $data");
-      }
-
-      print("=== END DEBUG ===");
-    } catch (e) {
-      print("Error debugging Firestore data: $e");
     }
   }
 }

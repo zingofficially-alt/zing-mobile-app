@@ -33,11 +33,30 @@ async function requireUser(req, res, next) {
 const requireAdmin = (req, res, next) =>
   req.user.role === 'Admin' ? next() : res.status(403).json({error: 'forbidden'});
 
-// Replaces the deleteUser Cloud Function.
-app.delete('/admin/users/:id', requireUser, requireAdmin, async (req, res) => {
-  const {error} = await admin.auth.admin.deleteUser(req.params.id); // cascades to profiles
+// Replaces the deleteUser Cloud Function: a user may delete their own account,
+// anyone else's needs an Admin. Deleting the auth user cascades to profile, store, etc.
+app.delete('/users/:id', requireUser, async (req, res) => {
+  if (req.params.id !== req.user.id && req.user.role !== 'Admin') {
+    return res.status(403).json({error: 'Only an admin can delete other accounts.'});
+  }
+  const {error} = await admin.auth.admin.deleteUser(req.params.id);
   if (error) return res.status(400).json({error: error.message});
   res.json({ok: true});
+});
+
+// Admin creates a user (Auth + role) without signing the admin out.
+app.post('/admin/users', requireUser, requireAdmin, async (req, res) => {
+  const {email, password, name = '', phone_number = '', role = 'User'} = req.body || {};
+  if (!email || !password) return res.status(400).json({error: 'email and password required'});
+  if (!['User', 'Owner', 'Admin'].includes(role)) return res.status(400).json({error: 'invalid role'});
+  const {data, error} = await admin.auth.admin.createUser({
+    email, password, email_confirm: true, user_metadata: {name},
+  });
+  if (error) return res.status(400).json({error: error.message});
+  const {error: pErr} = await admin.from('profiles')
+    .update({name, phone_number, role, email}).eq('id', data.user.id);
+  if (pErr) return res.status(400).json({error: pErr.message});
+  res.status(201).json({id: data.user.id});
 });
 
 // Replaces logUserEvent.

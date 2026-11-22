@@ -1,6 +1,6 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:zing/Modal/CoustomUser.dart';
 import 'RecommendationService.dart';
 
@@ -22,7 +22,7 @@ class RecommendationProvider extends ChangeNotifier {
   String getToken(String placement) => _attributionTokens[placement] ?? '';
 
   String get _visitorId {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final uid = Supabase.instance.client.auth.currentUser?.id;
     return uid ?? 'anonymous';
   }
 
@@ -35,7 +35,7 @@ class RecommendationProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final uid = Supabase.instance.client.auth.currentUser?.id;
       final data = await _service.getRecommendations(
         placement: placement,
         userId: uid,
@@ -60,7 +60,7 @@ class RecommendationProvider extends ChangeNotifier {
     double? purchaseAmount,
     String? transactionId,
   }) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final uid = Supabase.instance.client.auth.currentUser?.id;
     await _service.logEvent(
       eventType: eventType,
       userId: uid,

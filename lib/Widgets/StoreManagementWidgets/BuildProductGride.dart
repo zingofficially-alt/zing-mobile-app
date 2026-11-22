@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
 import '../../Modal/CoustomUser.dart';
@@ -96,10 +96,10 @@ class _EnhancedProductGridState extends State<EnhancedProductGrid>
     if (confirm != true) return;
 
     try {
-      await FirebaseFirestore.instance
-          .collection('products')
-          .doc(product.id)
-          .delete();
+      await Supabase.instance.client
+          .from('products')
+          .delete()
+          .eq('id', product.id);
 
       if (widget.onProductDeleted != null) {
         widget.onProductDeleted!(index);

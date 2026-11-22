@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../Modal/CoustomUser.dart';
@@ -19,7 +19,6 @@ class _EnhancedOrderManagementPageState extends State<EnhancedOrderManagementPag
   bool _isLoading = true;
   List<Orders> _cachedOrders = [];
   String _selectedFilter = 'All';
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   late AnimationController _fadeController;
   late AnimationController _staggerController;
@@ -70,16 +69,14 @@ class _EnhancedOrderManagementPageState extends State<EnhancedOrderManagementPag
     try {
       debugPrint("Fetching orders for store: ${widget.storeId}");
 
-      final querySnapshot = await _firestore
-          .collection('stores')
-          .doc(widget.storeId)
-          .collection('orders')
-          .orderBy('placedAt', descending: true)
-          .get();
+      final rows = await Supabase.instance.client
+          .from('orders')
+          .select(Orders.select)
+          .eq('store_id', widget.storeId)
+          .order('placed_at', ascending: false);
 
-      final fetchedOrders = querySnapshot.docs.map((doc) {
-        return Orders.fromDocument(doc);
-      }).toList();
+      final fetchedOrders =
+          (rows as List).map((r) => Orders.fromRow(r)).toList();
 
       setState(() => _cachedOrders = fetchedOrders);
 

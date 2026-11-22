@@ -1,5 +1,3 @@
-import 'package:firebase_core/firebase_core.dart';
-
 /// Values injected at build time from the project-root `.env` file:
 ///
 ///   flutter run --dart-define-from-file=.env
@@ -12,26 +10,14 @@ class Env {
   static const googleTranslateApiKey = String.fromEnvironment('GOOGLE_TRANSLATE_API_KEY');
   static const googleDirectionsApiKey = String.fromEnvironment('GOOGLE_DIRECTIONS_API_KEY');
 
-  static const _webApiKey = String.fromEnvironment('FIREBASE_WEB_API_KEY');
-  static const _webAuthDomain = String.fromEnvironment('FIREBASE_WEB_AUTH_DOMAIN');
-  static const _webProjectId = String.fromEnvironment('FIREBASE_WEB_PROJECT_ID');
-  static const _webStorageBucket = String.fromEnvironment('FIREBASE_WEB_STORAGE_BUCKET');
-  static const _webMessagingSenderId = String.fromEnvironment('FIREBASE_WEB_MESSAGING_SENDER_ID');
-  static const _webAppId = String.fromEnvironment('FIREBASE_WEB_APP_ID');
-  static const _webMeasurementId = String.fromEnvironment('FIREBASE_WEB_MEASUREMENT_ID');
+  /// Supabase project URL and publishable (anon) key. Safe to ship in the app:
+  /// Row Level Security protects the data. Never put the service_role key here.
+  static const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+  static const supabasePublishableKey = String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY');
 
-  static bool get hasFirebaseWebConfig =>
-      _webApiKey.isNotEmpty && _webAppId.isNotEmpty && _webProjectId.isNotEmpty;
+  /// Base URL of the Node API (Railway), e.g. https://api.zing.ipynb.site
+  static const apiBaseUrl = String.fromEnvironment('API_BASE_URL');
 
-  /// Firebase options for the web build. Android and iOS use
-  /// google-services.json / GoogleService-Info.plist instead.
-  static FirebaseOptions get firebaseWebOptions => FirebaseOptions(
-        apiKey: _webApiKey,
-        authDomain: _webAuthDomain,
-        projectId: _webProjectId,
-        storageBucket: _webStorageBucket,
-        messagingSenderId: _webMessagingSenderId,
-        appId: _webAppId,
-        measurementId: _webMeasurementId.isEmpty ? null : _webMeasurementId,
-      );
+  static bool get hasSupabaseConfig =>
+      supabaseUrl.isNotEmpty && supabasePublishableKey.isNotEmpty;
 }

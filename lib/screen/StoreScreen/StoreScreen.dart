@@ -6,7 +6,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:animate_do/animate_do.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -22,7 +22,6 @@ import '../../Service/RecommendationProvider.dart';
 import '../../Service/ThemeProvider.dart';
 import '../../screen/StoreScreen/ProductDetailsScreen.dart';
 import '../../Widgets/Recommendations/RecommendedProductsRow.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'customCarousel.dart';
 import '../../config/env.dart';
@@ -167,12 +166,14 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> with SingleTicker
     }
 
     // Save to Firestore (this would need to be implemented via a service)
-    FirebaseFirestore.instance
-        .collection('users')
-        .doc(widget.user!.id)
-        .update({
-      'favorites': widget.user!.favorites,
-    }).then((_) {
+    final favorites = Supabase.instance.client.from('user_favorites');
+    (_isFavorite
+            ? favorites.upsert({'user_id': widget.user!.id, 'store_id': widget.store.id})
+            : favorites
+                .delete()
+                .eq('user_id', widget.user!.id)
+                .eq('store_id', widget.store.id!))
+        .then((_) {
       // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -404,9 +405,9 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> with SingleTicker
   // --------------------------------------------------------------------------
   // Ratings
   Future<void> _checkIfUserHasRated() async {
-    User? firebaseUser = FirebaseAuth.instance.currentUser;
+    final firebaseUser = Supabase.instance.client.auth.currentUser;
     if (firebaseUser != null) {
-      bool hasRated = await widget.store.userHasRated(firebaseUser.uid);
+      bool hasRated = await widget.store.userHasRated(firebaseUser.id);
       setState(() {
         _hasRated = hasRated;
       });
@@ -430,9 +431,9 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> with SingleTicker
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
 
-    User? firebaseUser = FirebaseAuth.instance.currentUser;
+    final firebaseUser = Supabase.instance.client.auth.currentUser;
     if (firebaseUser != null) {
-      await widget.store.submitRating(firebaseUser.uid, _currentRating);
+      await widget.store.submitRating(firebaseUser.id, _currentRating);
       setState(() {
         _hasRated = true;
       });

@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:zing/Service/ApiClient.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'package:share_plus/share_plus.dart';
@@ -329,22 +328,19 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
     });
 
     try {
-      final user = FirebaseAuth.instance.currentUser;
+      final user = Supabase.instance.client.auth.currentUser;
       if (user != null) {
-        final credential = EmailAuthProvider.credential(
-          email: user.email!,
-          password: currentPassword,
-        );
-
-        await user.reauthenticateWithCredential(credential);
-        await user.updatePassword(newPassword);
-        await user.reload();
+        // Verify the current password, then set the new one.
+        await Supabase.instance.client.auth
+            .signInWithPassword(email: user.email!, password: currentPassword);
+        await Supabase.instance.client.auth
+            .updateUser(UserAttributes(password: newPassword));
 
         _showSuccessSnackBar('Password updated successfully');
       }
     } catch (e) {
       String errorMessage = 'Error updating password';
-      if (e.toString().contains('wrong-password')) {
+      if (e.toString().toLowerCase().contains('invalid login') || e.toString().contains('invalid_credentials')) {
         errorMessage = 'Incorrect current password';
       } else if (e.toString().contains('requires-recent-login')) {
         errorMessage = 'Please log in again to change your password';
@@ -625,24 +621,16 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
     });
 
     try {
-      final user = FirebaseAuth.instance.currentUser;
+      final user = Supabase.instance.client.auth.currentUser;
       if (user != null) {
-        // Re-authenticate the user
-        final credential = EmailAuthProvider.credential(
-          email: user.email!,
-          password: password,
-        );
-
-        await user.reauthenticateWithCredential(credential);
-
-        // Update email in Firebase Auth
-        await user.verifyBeforeUpdateEmail(newEmail);
-
-        // Update email in Firestore
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .update({'email': newEmail});
+        // Re-authenticate, then request the change (Supabase emails a confirmation link).
+        await Supabase.instance.client.auth
+            .signInWithPassword(email: user.email!, password: password);
+        await Supabase.instance.client.auth
+            .updateUser(UserAttributes(email: newEmail));
+        await Supabase.instance.client
+            .from('profiles')
+            .update({'email': newEmail}).eq('id', user.id);
 
         // Update the user provider
         final userProvider = Provider.of<CustomUserProvider>(context, listen: false);
@@ -652,7 +640,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
       }
     } catch (e) {
       String errorMessage = 'Error updating email';
-      if (e.toString().contains('wrong-password')) {
+      if (e.toString().toLowerCase().contains('invalid login') || e.toString().contains('invalid_credentials')) {
         errorMessage = 'Incorrect password';
       } else if (e.toString().contains('requires-recent-login')) {
         errorMessage = 'Please log in again to change your email';
@@ -831,7 +819,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
   Future<void> _deleteAccount(BuildContext context) async {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final user = FirebaseAuth.instance.currentUser;
+    final user = Supabase.instance.client.auth.currentUser;
 
     if (user == null) {
       _showErrorSnackBar('No user is logged in');
@@ -1200,11 +1188,10 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                             if (_formKey.currentState!.validate()) {
                               try {
                                 // Re-authenticate the user
-                                final credential = EmailAuthProvider.credential(
+                                await Supabase.instance.client.auth.signInWithPassword(
                                   email: user.email!,
                                   password: passwordController.text.trim(),
                                 );
-                                await user.reauthenticateWithCredential(credential);
                                 if (context.mounted) {
                                   Navigator.of(context).pop(true);
                                 }
@@ -1252,196 +1239,14 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
   }
 
   Future<void> _deleteUserDataAndAccount(User user) async {
-    final userId = user.uid;
-    final firestore = FirebaseFirestore.instance;
-    final storage = FirebaseStorage.instance;
-
-    // Get user data to check if they own a store
-    final userDoc = await firestore.collection('users').doc(userId).get();
-    final userData = userDoc.data();
-
-    // 1. Delete profile image from Storage (if exists)
-    if (userData != null && userData['profileImageUrl'] != null) {
-      try {
-        final profileImageUrl = userData['profileImageUrl'] as String;
-        if (profileImageUrl.isNotEmpty && profileImageUrl.contains('firebase')) {
-          final ref = storage.refFromURL(profileImageUrl);
-          await ref.delete();
-        }
-      } catch (e) {
-        print('Error deleting profile image: $e');
-      }
-    }
-
-    // 2. Delete user's cart items
-    try {
-      final cartSnapshot = await firestore
-          .collection('users')
-          .doc(userId)
-          .collection('cart')
-          .get();
-
-      for (var doc in cartSnapshot.docs) {
-        await doc.reference.delete();
-      }
-    } catch (e) {
-      print('Error deleting cart: $e');
-    }
-
-    // 3. Delete user's payments
-    try {
-      final paymentsSnapshot = await firestore
-          .collection('users')
-          .doc(userId)
-          .collection('payments')
-          .get();
-
-      for (var doc in paymentsSnapshot.docs) {
-        await doc.reference.delete();
-      }
-    } catch (e) {
-      print('Error deleting payments: $e');
-    }
-
-    // 4. Delete user's orders subcollection
-    try {
-      final ordersSnapshot = await firestore
-          .collection('users')
-          .doc(userId)
-          .collection('orders')
-          .get();
-
-      for (var doc in ordersSnapshot.docs) {
-        await doc.reference.delete();
-      }
-    } catch (e) {
-      print('Error deleting user orders: $e');
-    }
-
-    // 5. Delete user's store (if they are an owner)
-    if (userData != null && userData['role'] == 'Owner' && userData['store'] != null) {
-      try {
-        final storeData = userData['store'] as Map<String, dynamic>;
-        final storeId = storeData['id'] as String?;
-
-        if (storeId != null) {
-          // Delete all products in the store
-          final productsSnapshot = await firestore
-              .collection('stores')
-              .doc(storeId)
-              .collection('products')
-              .get();
-
-          for (var doc in productsSnapshot.docs) {
-            // Delete product images from storage
-            final productData = doc.data();
-            if (productData['imageUrl'] != null) {
-              try {
-                final imageUrl = productData['imageUrl'] as String;
-                if (imageUrl.isNotEmpty && imageUrl.contains('firebase')) {
-                  final ref = storage.refFromURL(imageUrl);
-                  await ref.delete();
-                }
-              } catch (e) {
-                print('Error deleting product image: $e');
-              }
-            }
-            await doc.reference.delete();
-          }
-
-          // Delete all orders in the store
-          final storeOrdersSnapshot = await firestore
-              .collection('stores')
-              .doc(storeId)
-              .collection('orders')
-              .get();
-
-          for (var doc in storeOrdersSnapshot.docs) {
-            await doc.reference.delete();
-          }
-
-          // Delete store images from storage
-          final storeDoc = await firestore.collection('stores').doc(storeId).get();
-          final storeInfo = storeDoc.data();
-          if (storeInfo != null && storeInfo['imageUrl'] != null) {
-            try {
-              final imageUrl = storeInfo['imageUrl'] as String;
-              if (imageUrl.isNotEmpty && imageUrl.contains('firebase')) {
-                final ref = storage.refFromURL(imageUrl);
-                await ref.delete();
-              }
-            } catch (e) {
-              print('Error deleting store image: $e');
-            }
-          }
-
-          // Delete the store document
-          await firestore.collection('stores').doc(storeId).delete();
-        }
-      } catch (e) {
-        print('Error deleting store: $e');
-      }
-    }
-
-    // 6. Delete or update chats where user is a participant
-    try {
-      final chatsSnapshot = await firestore
-          .collection('chats')
-          .where('participants', arrayContains: userId)
-          .get();
-
-      for (var chatDoc in chatsSnapshot.docs) {
-        // Delete all messages in the chat
-        final messagesSnapshot = await chatDoc.reference
-            .collection('messages')
-            .get();
-
-        for (var messageDoc in messagesSnapshot.docs) {
-          await messageDoc.reference.delete();
-        }
-
-        // Delete the chat document
-        await chatDoc.reference.delete();
-      }
-    } catch (e) {
-      print('Error deleting chats: $e');
-    }
-
-    // 7. Remove user from favorites in other users' documents
-    try {
-      // This is optional - you can decide whether to keep this or not
-      // It removes the deleted user's store from other users' favorites
-      if (userData != null && userData['role'] == 'Owner' && userData['store'] != null) {
-        final storeData = userData['store'] as Map<String, dynamic>;
-        final storeId = storeData['id'] as String?;
-
-        if (storeId != null) {
-          final usersWithFavorite = await firestore
-              .collection('users')
-              .where('favorites', arrayContains: storeId)
-              .get();
-
-          for (var userDoc in usersWithFavorite.docs) {
-            await userDoc.reference.update({
-              'favorites': FieldValue.arrayRemove([storeId])
-            });
-          }
-        }
-      }
-    } catch (e) {
-      print('Error updating favorites: $e');
-    }
-
-    // 8. Delete the main user document
-    await firestore.collection('users').doc(userId).delete();
-
-    // 9. Delete Firebase Authentication account
-    await user.delete();
+    // The Node API deletes the auth user; the database cascades to the profile,
+    // cart, payments, orders, store, products, chats and favorites.
+    await ApiClient.delete('/users/${user.id}');
+    await Supabase.instance.client.auth.signOut();
 
     if (mounted) {
       _showSuccessSnackBar('Account deleted successfully');
 
-      // Navigate to login screen
       Navigator.of(context).pushNamedAndRemoveUntil(
         '/login',
         (route) => false,
@@ -1715,7 +1520,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                           icon: Icons.logout_outlined,
                           iconColor: ZingColors.warning,
                           onTap: () {
-                            FirebaseAuth.instance.signOut();
+                            Supabase.instance.client.auth.signOut();
                             Navigator.of(context).pushReplacementNamed('/login');
                           },
                         ),

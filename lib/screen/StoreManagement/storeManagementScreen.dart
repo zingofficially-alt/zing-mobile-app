@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:flutter/services.dart';
 import 'dart:ui';
@@ -50,7 +50,7 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
   late Animation<Offset> _slideAnimation;
   late Animation<double> _scaleAnimation;
 
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  SupabaseClient get _db => Supabase.instance.client;
 
   @override
   void initState() {
@@ -182,17 +182,15 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
 
   Future<void> _fetchLatestPaymentAndCalculateDaysLeft(String userId) async {
     try {
-      final paymentSnapshot = await _firestore
-          .collection('users')
-          .doc(userId)
-          .collection('payments')
-          .orderBy('paymentDate', descending: true)
-          .limit(1)
-          .get();
+      final payments = await _db
+          .from('payments')
+          .select('paid_at')
+          .eq('user_id', userId)
+          .order('paid_at', ascending: false)
+          .limit(1);
 
-      if (paymentSnapshot.docs.isNotEmpty) {
-        final paymentData = paymentSnapshot.docs.first.data();
-        final paymentDate = (paymentData['paymentDate'] as Timestamp).toDate();
+      if ((payments as List).isNotEmpty) {
+        final paymentDate = Timestamp.parse(payments.first['paid_at']).toDate();
         _daysLeft = 30 - DateTime.now().difference(paymentDate).inDays;
 
         if (_daysLeft <= 0) {
@@ -211,27 +209,11 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
 
   Future<void> _fetchProductsForStore(String storeId) async {
     try {
-      final productSnapshot = await _firestore
-          .collection('stores')
-          .doc(storeId)
-          .collection('products')
-          .get();
+      final rows = await _db.from('products').select().eq('store_id', storeId);
 
       if (!mounted) return;
 
-      final products = productSnapshot.docs.map((doc) {
-        final data = doc.data();
-        return Product(
-          id: doc.id,
-          name: data['name'] ?? '',
-          description: data['description'] ?? '',
-          price: (data['price'] ?? 0).toDouble(),
-          rating: (data['rating'] ?? 0).toDouble(),
-          imageUrl: data['imageUrl'] ?? '',
-          isAvailable: data['isAvailable'] ?? true,
-          discount: data['discount']?.toDouble(),
-        );
-      }).toList();
+      final products = (rows as List).map((r) => Product.fromRow(r)).toList();
 
       setState(() {
         _products = products;
@@ -243,19 +225,16 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
 
   Future<void> _fetchRecentOrders(String storeId) async {
     try {
-      final orderSnapshot = await _firestore
-          .collection('stores')
-          .doc(storeId)
-          .collection('orders')
-          .orderBy('placedAt', descending: true)
-          .limit(10)
-          .get();
+      final rows = await _db
+          .from('orders')
+          .select(Orders.select)
+          .eq('store_id', storeId)
+          .order('placed_at', ascending: false)
+          .limit(10);
 
       if (!mounted) return;
 
-      final orders = orderSnapshot.docs.map((doc) {
-        return Orders.fromDocument(doc);
-      }).toList();
+      final orders = (rows as List).map((r) => Orders.fromRow(r)).toList();
 
       setState(() {
         _recentOrders = orders;
@@ -269,16 +248,11 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
 
   Future<void> _fetchCustomerCount(String storeId) async {
     try {
-      final orderSnapshot = await _firestore
-          .collection('stores')
-          .doc(storeId)
-          .collection('orders')
-          .get();
+      final rows = await _db.from('orders').select('user_id').eq('store_id', storeId);
 
       final uniqueCustomers = <String>{};
-      for (var doc in orderSnapshot.docs) {
-        final data = doc.data();
-        final userId = data['userId'] as String?;
+      for (final r in rows as List) {
+        final userId = r['user_id'] as String?;
         if (userId != null) {
           uniqueCustomers.add(userId);
         }
@@ -297,23 +271,21 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
       final now = DateTime.now();
       final lastWeek = now.subtract(const Duration(days: 7));
 
-      final orderSnapshot = await _firestore
-          .collection('stores')
-          .doc(storeId)
-          .collection('orders')
-          .where('placedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(lastWeek))
-          .orderBy('placedAt', descending: false)
-          .get();
+      final rows = await _db
+          .from('orders')
+          .select('placed_at, total_price')
+          .eq('store_id', storeId)
+          .gte('placed_at', lastWeek.toUtc().toIso8601String())
+          .order('placed_at', ascending: true);
 
       final Map<String, double> salesByDay = {
         'Mon': 0, 'Tue': 0, 'Wed': 0, 'Thu': 0, 'Fri': 0, 'Sat': 0, 'Sun': 0,
       };
 
-      for (var doc in orderSnapshot.docs) {
-        final data = doc.data();
-        final placedAt = (data['placedAt'] as Timestamp).toDate();
+      for (final r in rows as List) {
+        final placedAt = Timestamp.parse(r['placed_at']).toDate();
         final dayName = DateFormat('E').format(placedAt).substring(0, 3);
-        final price = (data['totalPrice'] as num).toDouble();
+        final price = (r['total_price'] as num).toDouble();
 
         salesByDay[dayName] = (salesByDay[dayName] ?? 0) + price;
       }
@@ -331,17 +303,15 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
       final activities = <Map<String, dynamic>>[];
 
       // Recent orders
-      final orderSnapshot = await _firestore
-          .collection('stores')
-          .doc(storeId)
-          .collection('orders')
-          .orderBy('placedAt', descending: true)
-          .limit(3)
-          .get();
+      final rows = await _db
+          .from('orders')
+          .select('id, placed_at, total_price')
+          .eq('store_id', storeId)
+          .order('placed_at', ascending: false)
+          .limit(3);
 
-      for (var doc in orderSnapshot.docs) {
-        final data = doc.data();
-        final orderTime = (data['placedAt'] as Timestamp).toDate();
+      for (final data in rows as List) {
+        final orderTime = Timestamp.parse(data['placed_at']).toDate();
         final timeDiff = DateTime.now().difference(orderTime);
 
         String timeAgo;
@@ -355,10 +325,10 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
 
         activities.add({
           'type': 'order',
-          'title': 'New order #${doc.id.substring(0, 4)}',
-          'subtitle': 'Order of \$${data['totalPrice']} placed',
+          'title': 'New order #${(data['id'] as String).substring(0, 4)}',
+          'subtitle': 'Order of \$${data['total_price']} placed',
           'time': timeAgo,
-          'amount': '\$${(data['totalPrice'] as num).toStringAsFixed(2)}',
+          'amount': '\$${(data['total_price'] as num).toStringAsFixed(2)}',
         });
       }
 

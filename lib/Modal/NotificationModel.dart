@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:zing/Modal/types.dart';
 
 class ZingNotification {
   final String id;
@@ -19,25 +19,15 @@ class ZingNotification {
     this.data,
   });
 
-  factory ZingNotification.fromDocument(DocumentSnapshot doc) {
-    final d = doc.data() as Map<String, dynamic>;
+  factory ZingNotification.fromRow(Map<String, dynamic> d) {
     return ZingNotification(
-      id: doc.id,
+      id: d['id'] ?? '',
       title: d['title'] ?? '',
       body: d['body'] ?? '',
       type: d['type'] ?? 'system',
-      isRead: d['isRead'] ?? false,
-      createdAt: d['createdAt'] ?? Timestamp.now(),
-      data: d['data'],
+      isRead: d['is_read'] ?? false,
+      createdAt: Timestamp.parse(d['created_at']),
+      data: (d['data'] as Map?)?.cast<String, dynamic>(),
     );
   }
-
-  Map<String, dynamic> toMap() => {
-    'title': title,
-    'body': body,
-    'type': type,
-    'isRead': isRead,
-    'createdAt': createdAt,
-    'data': data,
-  };
 }

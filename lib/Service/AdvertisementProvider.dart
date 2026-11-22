@@ -1,8 +1,7 @@
 import 'dart:io';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:zing/Service/StorageService.dart';
 
 class Advertisement {
   final String imageUrl;
@@ -10,28 +9,22 @@ class Advertisement {
 
   Advertisement({required this.imageUrl, required this.description});
 
-  factory Advertisement.fromFDocument(DocumentSnapshot doc) {
-    return Advertisement(
-      imageUrl: doc['imageUrl'] ?? '',
-      description: doc['description'] ?? '',
-    );
-  }
+  factory Advertisement.fromRow(Map<String, dynamic> r) => Advertisement(
+        imageUrl: r['image_url'] ?? '',
+        description: r['description'] ?? '',
+      );
 
-  Map<String, dynamic> toMap() {
-    return {
-      'imageUrl': imageUrl,
-      'description': description,
-    };
-  }
+  Map<String, dynamic> toRow() => {'image_url': imageUrl, 'description': description};
 }
 
 class AdvertisementProvider with ChangeNotifier {
   List<Advertisement> _advertisements = [];
-
   List<Advertisement> get advertisements => _advertisements;
 
   bool isLoading = false;
   String errorMessage = '';
+
+  SupabaseClient get _db => Supabase.instance.client;
 
   Future<void> fetchAdvertisements() async {
     try {
@@ -39,51 +32,42 @@ class AdvertisementProvider with ChangeNotifier {
       errorMessage = '';
       notifyListeners();
 
-      QuerySnapshot snapshot = await FirebaseFirestore.instance.collection('advertisements').get();
-      _advertisements = snapshot.docs.map((doc) => Advertisement.fromFDocument(doc)).toList();
+      final rows = await _db.from('advertisements').select().order('created_at');
+      _advertisements = (rows as List).map((r) => Advertisement.fromRow(r)).toList();
 
       isLoading = false;
       notifyListeners();
     } catch (e) {
-      print("Error fetching advertisements: $e");
+      print('Error fetching advertisements: $e');
       isLoading = false;
-      errorMessage = "Failed to load advertisements";
+      errorMessage = 'Failed to load advertisements';
       notifyListeners();
     }
   }
-
-
-
 
   Future<void> addAdvertisement(String description, File imageFile) async {
     try {
-      String fileName = 'advertisements/${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final path = 'advertisements/${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final imageUrl = await StorageService.uploadFile(Buckets.banners, path, imageFile);
 
-      // Upload image to Firebase Storage
-      TaskSnapshot snapshot = await FirebaseStorage.instance.ref(fileName).putFile(imageFile);
-      String imageUrl = await snapshot.ref.getDownloadURL();
+      final advertisement = Advertisement(imageUrl: imageUrl, description: description);
+      await _db.from('advertisements').insert(advertisement.toRow());
 
-      // Save to Firestore
-      Advertisement advertisement = Advertisement(imageUrl: imageUrl, description: description);
-      await FirebaseFirestore.instance.collection('advertisements').add(advertisement.toMap());
-
-      // Update local list
       _advertisements.add(advertisement);
       notifyListeners();
     } catch (e) {
-      print("Error adding advertisement: $e");
+      print('Error adding advertisement: $e');
     }
   }
 
-
-  Future<void> deleteAdvertisement(String id) async {
+  /// The admin screen identifies an ad by its image URL.
+  Future<void> deleteAdvertisement(String imageUrl) async {
     try {
-      await FirebaseFirestore.instance.collection('advertisements').doc(id).delete();
-      _advertisements.removeWhere((ad) => ad.imageUrl == id);
+      await _db.from('advertisements').delete().eq('image_url', imageUrl);
+      _advertisements.removeWhere((ad) => ad.imageUrl == imageUrl);
       notifyListeners();
     } catch (e) {
-      print("Error deleting advertisement: $e");
+      print('Error deleting advertisement: $e');
     }
   }
-
 }

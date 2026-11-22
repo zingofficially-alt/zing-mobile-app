@@ -1,8 +1,7 @@
 import 'dart:math' as math;
 import 'dart:io' show Platform;
 
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -80,20 +79,14 @@ void main() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  if (kIsWeb) {
-    // Web has no google-services file; options come from .env.
-    if (!Env.hasFirebaseWebConfig) {
-      throw StateError(
-          'Firebase web config missing. Run with --dart-define-from-file=.env');
-    }
-    await Firebase.initializeApp(options: Env.firebaseWebOptions);
-  } else {
-    await Firebase.initializeApp();
+  if (!Env.hasSupabaseConfig) {
+    throw StateError(
+        'Supabase config missing. Run with --dart-define-from-file=.env');
   }
-
-  if (!kIsWeb && Platform.isIOS) {
-    debugPrint('Firebase initialized for iOS');
-  }
+  await Supabase.initialize(
+    url: Env.supabaseUrl,
+    anonKey: Env.supabasePublishableKey,
+  );
 
   await requestPermissions();
 
@@ -168,20 +161,18 @@ class HelpSupportPlaceholderScreen extends StatelessWidget {
 class AuthWrapper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
+    return StreamBuilder<AuthState>(
+      stream: Supabase.instance.client.auth.onAuthStateChange,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.active) {
-          User? user = snapshot.data;
-          if (user == null) {
-            return const SplashScreen();
-          } else {
-            return const MainShell();
-          }
+        final session =
+            snapshot.data?.session ?? Supabase.instance.client.auth.currentSession;
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            session == null) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
-        return const Scaffold(
-          body: Center(child: CircularProgressIndicator()),
-        );
+        return session == null ? const SplashScreen() : const MainShell();
       },
     );
   }

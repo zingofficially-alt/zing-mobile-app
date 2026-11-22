@@ -4,12 +4,12 @@ import 'package:provider/provider.dart';
 import 'package:zing/Service/CoustomUserProvider.dart';
 import 'package:zing/Service/StoreProvider.dart';
 import 'package:zing/Service/ThemeProvider.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:zing/Modal/types.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:zing/Modal/CoustomUser.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:zing/Service/StorageService.dart';
 import '../../Service/SettingProvider.dart';
 
 class AddEditStoreDialog extends StatefulWidget {
@@ -154,11 +154,7 @@ class _AddEditStoreDialogState extends State<AddEditStoreDialog> {
   Future<String> _uploadImageToFirebase(File imageFile) async {
     try {
       String fileName = 'store_images/${DateTime.now().millisecondsSinceEpoch}.jpg';
-      Reference storageRef = FirebaseStorage.instance.ref().child(fileName);
-      UploadTask uploadTask = storageRef.putFile(imageFile);
-      TaskSnapshot snapshot = await uploadTask;
-      String downloadUrl = await snapshot.ref.getDownloadURL();
-      return downloadUrl;
+      return await StorageService.uploadFile(Buckets.store, fileName, imageFile);
     } catch (e) {
       print('Error uploading image: $e');
       throw e;

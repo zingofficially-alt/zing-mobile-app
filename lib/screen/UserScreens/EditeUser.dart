@@ -4,11 +4,11 @@ import 'package:flutter_spinkit/flutter_spinkit.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:zing/Service/StorageService.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:zing/Modal/CoustomUser.dart';
 import 'package:zing/Service/CoustomUserProvider.dart';
 import 'package:zing/Service/ThemeProvider.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 class EditProfilePage extends StatefulWidget {
   @override
@@ -161,11 +161,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
     final userId = userProvider.user!.id;
 
     try {
-      FirebaseStorage storage = FirebaseStorage.instance;
-      Reference ref = storage.ref().child("user_images/$userId/profile.jpg");
-      UploadTask uploadTask = ref.putFile(image);
-      final snapshot = await uploadTask;
-      return await snapshot.ref.getDownloadURL();
+      return await StorageService.uploadFile(
+          Buckets.profile, '$userId/profile.jpg', image);
     } catch (e) {
       print('Error uploading image: $e');
       throw e;
@@ -239,22 +236,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   Future<void> _updateStoreOwnerDetails(CustomUser updatedUser) async {
     try {
-      if (updatedUser.store != null && updatedUser.store!.id != null) {
-        DocumentReference storeDocRef = FirebaseFirestore.instance
-            .collection('stores')
-            .doc(updatedUser.store!.id);
-
-        DocumentSnapshot storeSnapshot = await storeDocRef.get();
-
-        if (storeSnapshot.exists) {
-          await storeDocRef.update({
-            'owner.name': updatedUser.name,
-            'owner.email': updatedUser.email,
-            'owner.phone': updatedUser.phoneNumber,
-            'owner.profileImageUrl': updatedUser.profileImageUrl,
-          });
-        }
-      }
+      // The owner's name, email, phone and photo are joined from `profiles`
+      // when a store is loaded, so there is nothing to copy here.
     } catch (e) {
       print('Error updating store owner details: $e');
       throw e;

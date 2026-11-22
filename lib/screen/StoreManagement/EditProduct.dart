@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 import 'package:provider/provider.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:zing/Service/StorageService.dart';
 import 'package:path/path.dart' as path;
 import 'package:zing/Modal/CoustomUser.dart';
 import 'package:zing/Service/StoreProvider.dart';
@@ -217,16 +217,8 @@ class _EditProductScreenState extends State<EditProductScreen> {
       String fileExtension = path.extension(image.path);
       String fileName = 'product_$timestamp$fileExtension';
 
-      final storageRef = FirebaseStorage.instance.ref().child('products/$fileName');
-      UploadTask uploadTask = storageRef.putFile(image);
-
-      // Listen to upload progress (could be used to show percentage)
-      uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
-        // Optionally implement progress indicator logic here
-      });
-
-      TaskSnapshot taskSnapshot = await uploadTask;
-      String downloadUrl = await taskSnapshot.ref.getDownloadURL();
+      final String downloadUrl =
+          await StorageService.uploadFile(Buckets.product, 'products/$fileName', image);
 
       setState(() {
         _isUploading = false;

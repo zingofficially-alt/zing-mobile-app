@@ -1,173 +1,97 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../Modal/CoustomUser.dart';
-import 'CoustomUserProvider.dart';
 
 class OrderProvider with ChangeNotifier {
   List<Orders> _orders = [];
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  SupabaseClient get _db => Supabase.instance.client;
 
   List<Orders> get orders => _orders;
   bool _isLoading = false;
   bool get isLoading => _isLoading;
 
-  // Fetch orders for a specific store
+  /// Orders of one store, newest first, with line items and buyer details.
   Future<void> fetchOrdersByStore(BuildContext context, String storeId) async {
     _isLoading = true;
     notifyListeners();
-
     try {
-      print("Fetching orders for store: $storeId");
-
-      // Fetch orders
-      final querySnapshot = await _firestore
-          .collection('stores')
-          .doc(storeId)
-          .collection('orders')
-          .get();
-
-      final fetchedOrders = querySnapshot.docs.map((doc) {
-        print("Order data: ${doc.data()}");
-        return Orders.fromDocument(doc);
-      }).toList();
-
-      // Fetch user details
-      final userIds = fetchedOrders.map((order) => order.userId).toSet().toList();
-      print("User IDs: $userIds");
-
-      if (userIds.isNotEmpty) {
-        final userChunks = _splitList(userIds, 10); // Firestore 'whereIn' limit
-        final userMap = <String, CustomUser>{};
-
-        // Read each customer document individually: security rules allow
-        // reading a single user document but not querying the collection.
-        for (var chunk in userChunks) {
-          final docs = await Future.wait(
-            chunk.map((id) => _firestore.collection('users').doc(id).get()),
-          );
-          for (var doc in docs) {
-            final data = doc.data();
-            if (data != null) userMap[doc.id] = CustomUser.fromMap(data);
-          }
-        }
-
-        for (var order in fetchedOrders) {
-          final user = userMap[order.userId];
-          if (user != null) order.userDetails = user;
-        }
-      }
-
-      _orders = fetchedOrders;
-      notifyListeners();
+      final rows = await _db
+          .from('orders')
+          .select(Orders.select)
+          .eq('store_id', storeId)
+          .order('placed_at', ascending: false);
+      _orders = (rows as List).map((r) => Orders.fromRow(r)).toList();
     } catch (e, stackTrace) {
-      print("Error fetching orders: $e\n$stackTrace");
+      print('Error fetching orders: $e\n$stackTrace');
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  // Place an order for a user in a specific store
   Future<void> placeOrder(
-      String userId,
-      Store store,
-      List<Product> products,
-      double totalPrice,
-      String deliveryMethod,
-      CustomUser userData, {
-      double deliveryFee = 0.0,
-      String? deliveryAddress,
-      }) async {
+    String userId,
+    Store store,
+    List<Product> products,
+    double totalPrice,
+    String deliveryMethod,
+    CustomUser userData, {
+    double deliveryFee = 0.0,
+    String? deliveryAddress,
+  }) async {
     try {
-      final batch = _firestore.batch();
+      final order = await _db
+          .from('orders')
+          .insert({
+            'user_id': userId,
+            'store_id': store.id,
+            'delivery_method': deliveryMethod,
+            'delivery_fee': deliveryFee,
+            if (deliveryAddress != null && deliveryAddress.isNotEmpty)
+              'delivery_address': deliveryAddress,
+            'status': 'Pending',
+            'total_price': totalPrice,
+          })
+          .select('id')
+          .single();
 
-      // Order data
-      final orderData = {
-        'userId': userId,
-        'userDetails': userData.toMap(),
-        'storeId': store.id,
-        'storeName': store.name,
-        'deliveryMethod': deliveryMethod,
-        'deliveryFee': deliveryFee,
-        if (deliveryAddress != null && deliveryAddress.isNotEmpty)
-          'deliveryAddress': deliveryAddress,
-        'status': 'Pending',
-        'totalPrice': totalPrice,
-        'placedAt': Timestamp.now(),
-        'products': products.map((product) => product.toMap()).toList(),
-      };
-
-      // Add order to the store
-      final storeOrderRef = _firestore
-          .collection('stores')
-          .doc(store.id)
-          .collection('orders')
-          .doc();
-      batch.set(storeOrderRef, orderData);
-
-      // Add order to the user's document
-      final userOrderRef = _firestore
-          .collection('users')
-          .doc(userId)
-          .collection('orders')
-          .doc();
-      batch.set(userOrderRef, orderData);
-
-      await batch.commit();
-      print("Order placed successfully!");
+      await _db.from('order_items').insert(products
+          .map((p) => {
+                'order_id': order['id'],
+                'product_id': p.id.isEmpty ? null : p.id,
+                'name': p.name,
+                'price': p.price,
+                'image_url': p.imageUrl,
+                'quantity': p.quantity,
+              })
+          .toList());
     } catch (e) {
-      print("Error placing order: $e");
-      throw e;
+      print('Error placing order: $e');
+      rethrow;
     }
   }
 
-  // Update order status
   Future<void> updateOrderStatus(String storeId, String orderId, String newStatus) async {
     try {
-      await _firestore
-          .collection('stores')
-          .doc(storeId)
-          .collection('orders')
-          .doc(orderId)
-          .update({'status': newStatus});
+      await _db.from('orders').update({'status': newStatus}).eq('id', orderId);
       notifyListeners();
     } catch (e) {
-      print("Error updating order status: $e");
+      print('Error updating order status: $e');
     }
   }
 
-  // Fetch orders for a user across all stores
+  /// A user's orders across all stores, newest first.
   Future<List<Orders>> fetchUserOrdersAcrossStores(String userId) async {
     try {
-      final storeSnapshot = await _firestore.collection('stores').get();
-      List<Orders> userOrders = [];
-
-      for (var storeDoc in storeSnapshot.docs) {
-        final ordersSnapshot = await _firestore
-            .collection('stores')
-            .doc(storeDoc.id)
-            .collection('orders')
-            .where('userId', isEqualTo: userId)
-            .get();
-
-        userOrders.addAll(ordersSnapshot.docs.map((doc) => Orders.fromDocument(doc)).toList());
-      }
-
-      print("User orders fetched: ${userOrders.length}");
-      return userOrders;
+      final rows = await _db
+          .from('orders')
+          .select(Orders.select)
+          .eq('user_id', userId)
+          .order('placed_at', ascending: false);
+      return (rows as List).map((r) => Orders.fromRow(r)).toList();
     } catch (e) {
-      print("Error fetching user orders: $e");
+      print('Error fetching user orders: $e');
       return [];
     }
-  }
-
-  // Helper function to split a list into chunks
-  List<List<T>> _splitList<T>(List<T> list, int chunkSize) {
-    List<List<T>> chunks = [];
-    for (var i = 0; i < list.length; i += chunkSize) {
-      chunks.add(list.sublist(i, i + chunkSize > list.length ? list.length : i + chunkSize));
-    }
-    return chunks;
   }
 }

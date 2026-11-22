@@ -4,14 +4,47 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:ui';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:zing/Modal/CoustomUser.dart';
 import 'package:zing/Service/CoustomUserProvider.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:zing/Service/ThemeProvider.dart';
+
+/// Maps Supabase auth errors to messages for the user.
+String authErrorMessage(AuthException e) {
+  final code = (e.code ?? '').toLowerCase();
+  final msg = e.message.toLowerCase();
+  if (code == 'invalid_credentials' || msg.contains('invalid login')) {
+    return 'Invalid email or password. Please check your credentials.';
+  }
+  if (code == 'email_not_confirmed') {
+    return 'Please confirm your email first. Check your inbox for the link.';
+  }
+  if (code == 'user_not_found') {
+    return 'No account found with this email. Please check or sign up.';
+  }
+  if (code == 'user_already_exists' || code == 'email_exists') {
+    return 'This email is already registered. Please sign in instead.';
+  }
+  if (code == 'weak_password') {
+    return 'Password is too weak. Use at least 6 characters.';
+  }
+  if (code == 'over_request_rate_limit' || code == 'over_sms_send_rate_limit' ||
+      code == 'over_email_send_rate_limit' || e.statusCode == '429') {
+    return 'Too many attempts. Please try again later.';
+  }
+  if (code == 'otp_expired') {
+    return 'Code expired. Please request a new code.';
+  }
+  if (code == 'sms_send_failed' || code == 'provider_disabled' || msg.contains('sms')) {
+    return 'Could not send the SMS code. Phone login may not be set up yet; use email login.';
+  }
+  if (msg.contains('network') || msg.contains('socket')) {
+    return 'Network error. Please check your internet connection and try again.';
+  }
+  return e.message.isEmpty ? 'Something went wrong. Please try again.' : e.message;
+}
 
 class FirebaseLoginScreen extends StatefulWidget {
   const FirebaseLoginScreen({Key? key}) : super(key: key);
@@ -27,7 +60,7 @@ class _FirebaseLoginScreenState extends State<FirebaseLoginScreen>
   final TextEditingController phoneController = TextEditingController(text: '+94 ');
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final GoTrueClient _auth = Supabase.instance.client.auth;
   final _formKey = GlobalKey<FormState>();
   bool isLoading = false;
   bool isPasswordVisible = false;
@@ -292,7 +325,7 @@ class _FirebaseLoginScreenState extends State<FirebaseLoginScreen>
     });
 
     try {
-      await _auth.signInWithEmailAndPassword(
+      await _auth.signInWithPassword(
         email: emailController.text.trim(),
         password: passwordController.text.trim(),
       );
@@ -300,40 +333,10 @@ class _FirebaseLoginScreenState extends State<FirebaseLoginScreen>
       if (mounted) {
         Navigator.pushReplacementNamed(context, '/home');
       }
-    } on FirebaseAuthException catch (e) {
+    } on AuthException catch (e) {
       if (mounted) {
         setState(() {
-          switch (e.code) {
-            case 'user-not-found':
-              _errorMessage = "No account found with this email. Please check or sign up.";
-              break;
-            case 'wrong-password':
-              _errorMessage = "Incorrect password. Please try again or reset your password.";
-              break;
-            case 'invalid-email':
-              _errorMessage = "Invalid email format. Please enter a valid email address.";
-              break;
-            case 'user-disabled':
-              _errorMessage = "This account has been disabled. Please contact support.";
-              break;
-            case 'too-many-requests':
-              _errorMessage = "Too many failed attempts. Please try again later or reset your password.";
-              break;
-            case 'network-request-failed':
-              _errorMessage = "Network error. Please check your internet connection and try again.";
-              break;
-            case 'invalid-credential':
-              _errorMessage = "Invalid email or password. Please check your credentials.";
-              break;
-            case 'operation-not-allowed':
-              _errorMessage = "Email/password sign-in is disabled. Please contact support.";
-              break;
-            case 'email-already-in-use':
-              _errorMessage = "This email is already registered. Please sign in instead.";
-              break;
-            default:
-              _errorMessage = e.message ?? "Login failed. Please check your credentials and try again.";
-          }
+          _errorMessage = authErrorMessage(e);
         });
         HapticFeedback.heavyImpact();
       }
@@ -395,89 +398,25 @@ class _FirebaseLoginScreenState extends State<FirebaseLoginScreen>
 
     print("🔵 Starting Firebase phone verification...");
     try {
-      await _auth.verifyPhoneNumber(
-        phoneNumber: phoneNumber,
-        verificationCompleted: (PhoneAuthCredential credential) async {
-          print("\n✅ ========== VERIFICATION COMPLETED (AUTO) ==========");
-          print("✅ Auto-verification successful, signing in...");
-
-          UserCredential userCredential = await _auth.signInWithCredential(credential);
-          print("✅ User signed in: ${userCredential.user?.uid}");
-
-          if (userCredential.additionalUserInfo?.isNewUser ?? false) {
-            print("🔵 New user detected, saving to Firestore...");
-            await _saveUserToFirestore(userCredential.user!);
-          }
-
-          print("✅ Phone verification successful, navigating to home");
-
-          if (mounted) {
-            Navigator.pushReplacementNamed(context, '/home');
-          }
-        },
-        verificationFailed: (FirebaseAuthException e) {
-          print("\n❌ ========== VERIFICATION FAILED ==========");
-          print("❌ Error code: ${e.code}");
-          print("❌ Error message: ${e.message}");
-          print("❌ Error details: $e");
-
-          if (mounted) {
-            setState(() {
-              isLoading = false;
-              switch (e.code) {
-                case 'invalid-phone-number':
-                  _errorMessage = "Invalid phone number format. Please check and try again.";
-                  print("❌ Invalid phone number format");
-                  break;
-                case 'too-many-requests':
-                  _errorMessage = "Too many verification attempts. Please try again in an hour.";
-                  print("❌ Too many requests");
-                  break;
-                case 'quota-exceeded':
-                  _errorMessage = "SMS quota exceeded. Please try again later or use email login.";
-                  print("❌ SMS quota exceeded");
-                  break;
-                case 'app-not-authorized':
-                  _errorMessage = "Phone authentication is not enabled. Please contact support.";
-                  print("❌ App not authorized for phone auth");
-                  break;
-                case 'network-request-failed':
-                  _errorMessage = "Network error. Please check your connection and try again.";
-                  print("❌ Network request failed");
-                  break;
-                default:
-                  _errorMessage = e.message ?? "Phone verification failed. Please try again.";
-                  print("❌ Other error: ${e.code}");
-              }
-            });
-            HapticFeedback.heavyImpact();
-          }
-        },
-        codeSent: (String verificationId, int? resendToken) {
-          print("\n✅ ========== CODE SENT ==========");
-          print("✅ Verification ID: $verificationId");
-          print("✅ Resend token: $resendToken");
-          print("✅ OTP retry count: $_otpRetryCount");
-
-          if (mounted) {
-            setState(() {
-              isLoading = false;
-              _verificationId = verificationId;
-              _otpRetryCount++;
-            });
-            _startResendCountdown();
-            _showOTPDialog();
-            print("✅ OTP dialog shown");
-          }
-        },
-        codeAutoRetrievalTimeout: (String verificationId) {
-          print("\n⏱️ ========== AUTO RETRIEVAL TIMEOUT ==========");
-          print("⏱️ Verification ID: $verificationId");
-          _verificationId = verificationId;
-        },
-        timeout: const Duration(seconds: 60),
-      );
+      await _auth.signInWithOtp(phone: phoneNumber);
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+          _verificationId = phoneNumber; // Supabase verifies by phone + code
+          _otpRetryCount++;
+        });
+        _startResendCountdown();
+        _showOTPDialog();
+      }
       print("🔵 verifyPhoneNumber() call completed");
+    } on AuthException catch (e) {
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+          _errorMessage = authErrorMessage(e);
+        });
+        HapticFeedback.heavyImpact();
+      }
     } catch (e) {
       print("\n❌ ========== EXCEPTION IN PHONE VERIFICATION ==========");
       print("❌ Exception type: ${e.runtimeType}");
@@ -555,20 +494,11 @@ class _FirebaseLoginScreenState extends State<FirebaseLoginScreen>
 
             try {
               if (_verificationId != null) {
-                print("✅ Creating phone auth credential with OTP...");
-                PhoneAuthCredential credential = PhoneAuthProvider.credential(
-                  verificationId: _verificationId!,
-                  smsCode: otp,
+                await _auth.verifyOTP(
+                  phone: _verificationId!,
+                  token: otp,
+                  type: OtpType.sms,
                 );
-
-                print("🔵 Signing in with credential from OTP dialog...");
-                UserCredential userCredential = await _auth.signInWithCredential(credential);
-                print("✅ Sign in successful from OTP dialog! User ID: ${userCredential.user?.uid}");
-
-                if (userCredential.additionalUserInfo?.isNewUser ?? false) {
-                  print("🔵 New user from OTP dialog, saving to Firestore...");
-                  await _saveUserToFirestore(userCredential.user!);
-                }
 
                 print("✅ Closing OTP dialog and navigating to home");
 
@@ -583,35 +513,14 @@ class _FirebaseLoginScreenState extends State<FirebaseLoginScreen>
                   otpError = "Verification session expired. Please try again.";
                 });
               }
-            } on FirebaseAuthException catch (e) {
-              print("\n❌ ========== OTP DIALOG FIREBASE ERROR ==========");
-              print("❌ Firebase error code: ${e.code}");
-              print("❌ Firebase error message: ${e.message}");
-              print("❌ Full error: $e");
-
+            } on AuthException catch (e) {
               setDialogState(() {
                 isVerifying = false;
-                switch (e.code) {
-                  case 'invalid-verification-code':
-                    otpError = "Invalid code. Please check and try again.";
-                    print("❌ Invalid verification code");
-                    for (var controller in controllers) {
-                      controller.clear();
-                    }
-                    focusNodes[0].requestFocus();
-                    break;
-                  case 'session-expired':
-                    otpError = "Session expired. Please request a new code.";
-                    print("❌ Session expired");
-                    break;
-                  case 'code-expired':
-                    otpError = "Code expired. Please request a new code.";
-                    print("❌ Code expired");
-                    break;
-                  default:
-                    otpError = "Verification failed: ${e.message ?? e.code}";
-                    print("❌ Other error: ${e.code}");
+                otpError = authErrorMessage(e);
+                for (var controller in controllers) {
+                  controller.clear();
                 }
+                focusNodes[0].requestFocus();
               });
             } catch (e) {
               print("\n❌ ========== OTP DIALOG EXCEPTION ==========");
@@ -830,16 +739,11 @@ class _FirebaseLoginScreenState extends State<FirebaseLoginScreen>
 
     try {
       if (_verificationId != null) {
-        PhoneAuthCredential credential = PhoneAuthProvider.credential(
-          verificationId: _verificationId!,
-          smsCode: otp,
+        await _auth.verifyOTP(
+          phone: _verificationId!,
+          token: otp,
+          type: OtpType.sms,
         );
-
-        UserCredential userCredential = await _auth.signInWithCredential(credential);
-
-        if (userCredential.additionalUserInfo?.isNewUser ?? false) {
-          await _saveUserToFirestore(userCredential.user!);
-        }
 
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/home');
@@ -879,40 +783,7 @@ class _FirebaseLoginScreenState extends State<FirebaseLoginScreen>
     );
   }
 
-  Future<void> _saveUserToFirestore(User user) async {
-    try {
-      final userData = {
-        'uid': user.uid,
-        'name': user.displayName ?? 'User',
-        'email': user.email ?? '',
-        'phone': user.phoneNumber ?? phoneController.text.trim(),
-        'role': 'User',
-        'profileImageUrl': user.photoURL ?? '',
-        'emailVerified': user.emailVerified,
-        'preferences': {
-          'darkMode': false,
-          'notifications': true,
-          'language': 'en',
-        },
-        'metadata': {
-          'signUpMethod': 'phone',
-          'platform': 'android',
-        },
-        'createdAt': FieldValue.serverTimestamp(),
-        'lastLoginAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      };
-
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set(userData, SetOptions(merge: true));
-
-      print("✅ User data saved to Firestore successfully for UID: ${user.uid}");
-    } catch (e) {
-      print("❌ Failed to save user data to Firestore: $e");
-    }
-  }
+  // The profile row is created by a database trigger when the auth user is created.
 
   @override
   Widget build(BuildContext context) {

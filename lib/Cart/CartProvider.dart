@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
 import 'package:zing/Modal/CoustomUser.dart'; // Assuming you have a Product model
@@ -34,6 +34,26 @@ class CartItem {
       'quantity': quantity,
     };
   }
+
+  /// Row of the `cart_items` table.
+  Map<String, dynamic> toRow(String userId) => {
+        'user_id': userId,
+        'product_id': id,
+        'store_id': storeId,
+        'name': name,
+        'price': price,
+        'image_url': imageUrl,
+        'quantity': quantity,
+      };
+
+  factory CartItem.fromRow(Map<String, dynamic> r) => CartItem(
+        id: r['product_id'],
+        name: r['name'] ?? '',
+        price: (r['price'] as num).toDouble(),
+        imageUrl: r['image_url'],
+        storeId: r['store_id'],
+        quantity: r['quantity'] ?? 1,
+      );
 
   factory CartItem.fromMap(Map<String, dynamic> map) {
     return CartItem(
@@ -71,18 +91,12 @@ class CartProvider with ChangeNotifier {
       _isLoading = true;
       notifyListeners();
 
-      // Get cart items from Firestore
-      final cartSnapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(_userId)
-          .collection('cart')
-          .get();
+      final rows = await Supabase.instance.client
+          .from('cart_items')
+          .select()
+          .eq('user_id', _userId);
 
-      // Clear current items and add items from Firestore
-      _items = [];
-      for (var doc in cartSnapshot.docs) {
-        _items.add(CartItem.fromMap(doc.data()));
-      }
+      _items = (rows as List).map((r) => CartItem.fromRow(r)).toList();
 
       _isLoading = false;
       notifyListeners();
@@ -103,24 +117,18 @@ class CartProvider with ChangeNotifier {
         // If item exists, increase quantity
         _items[existingItemIndex].quantity += 1;
 
-        // Update quantity in Firestore
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(_userId)
-            .collection('cart')
-            .doc(item.id)
-            .update({'quantity': _items[existingItemIndex].quantity});
+        await Supabase.instance.client
+            .from('cart_items')
+            .update({'quantity': _items[existingItemIndex].quantity})
+            .eq('user_id', _userId)
+            .eq('product_id', item.id);
       } else {
         // Otherwise add new item
         _items.add(item);
 
-        // Add to Firestore
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(_userId)
-            .collection('cart')
-            .doc(item.id)
-            .set(item.toMap());
+        await Supabase.instance.client
+            .from('cart_items')
+            .upsert(item.toRow(_userId));
       }
 
       notifyListeners();
@@ -138,13 +146,11 @@ class CartProvider with ChangeNotifier {
       if (existingItemIndex >= 0) {
         _items[existingItemIndex].quantity = quantity;
 
-        // Update quantity in Firestore
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(_userId)
-            .collection('cart')
-            .doc(item.id)
-            .update({'quantity': quantity});
+        await Supabase.instance.client
+            .from('cart_items')
+            .update({'quantity': quantity})
+            .eq('user_id', _userId)
+            .eq('product_id', item.id);
 
         notifyListeners();
       }
@@ -160,13 +166,11 @@ class CartProvider with ChangeNotifier {
       // Remove from local list
       _items.removeWhere((i) => i.id == item.id);
 
-      // Remove from Firestore
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(_userId)
-          .collection('cart')
-          .doc(item.id)
-          .delete();
+      await Supabase.instance.client
+          .from('cart_items')
+          .delete()
+          .eq('user_id', _userId)
+          .eq('product_id', item.id);
 
       notifyListeners();
     } catch (e) {
@@ -181,17 +185,7 @@ class CartProvider with ChangeNotifier {
       // Clear local list
       _items.clear();
 
-      // Get all cart items
-      final cartSnapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(_userId)
-          .collection('cart')
-          .get();
-
-      // Delete each item
-      for (var doc in cartSnapshot.docs) {
-        await doc.reference.delete();
-      }
+      await Supabase.instance.client.from('cart_items').delete().eq('user_id', _userId);
 
       notifyListeners();
     } catch (e) {

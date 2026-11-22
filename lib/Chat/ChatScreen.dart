@@ -2,7 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:zing/Modal/types.dart';
 // 1) Import translator
 import 'package:translator/translator.dart';
 
@@ -243,53 +243,6 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           const SizedBox(height: 2),
 
-          // Presence stream
-          StreamBuilder<DocumentSnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('stores')
-                .doc(widget.storeId)
-                .snapshots(),
-            builder: (context, snapshot) {
-              if (!snapshot.hasData &&
-                  snapshot.connectionState == ConnectionState.waiting) {
-                if (_cachedPresenceStatus == "Checking...") {
-                  return Text(_cachedPresenceStatus,
-                      style: TextStyle(color: Colors.grey[600], fontSize: 12));
-                } else {
-                  return Text(_cachedPresenceStatus,
-                      style: TextStyle(color: Colors.grey[600], fontSize: 12));
-                }
-              }
-
-              if (snapshot.hasError ||
-                  !snapshot.hasData ||
-                  snapshot.data == null ||
-                  !snapshot.data!.exists) {
-                _cachedPresenceStatus = "Offline";
-                return Text(_cachedPresenceStatus,
-                    style: TextStyle(color: Colors.redAccent, fontSize: 12));
-              }
-
-              final data = snapshot.data!.data() as Map<String, dynamic>;
-              final isOnline = data['isOnline'] ?? false;
-              final lastActive = data['lastActiveAt'] as Timestamp?;
-
-              if (isOnline) {
-                _cachedPresenceStatus = "Online";
-              } else {
-                final lastSeenText = _formatLastSeen(lastActive?.toDate());
-                _cachedPresenceStatus = lastSeenText;
-              }
-
-              return Text(
-                _cachedPresenceStatus,
-                style: TextStyle(
-                  color: isOnline ? Colors.green.shade400 : Colors.grey[600],
-                  fontSize: 12,
-                ),
-              );
-            },
-          ),
         ],
       ),
       centerTitle: false,

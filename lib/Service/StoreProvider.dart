@@ -1,9 +1,8 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import 'package:zing/Modal/CoustomUser.dart';
 import 'package:zing/Service/CoustomUserProvider.dart';
-// Import Store and Owner model
 
 class StoreProvider with ChangeNotifier {
   List<Store> _stores = [];
@@ -11,411 +10,191 @@ class StoreProvider with ChangeNotifier {
 
   List<Store> get stores => _stores;
 
+  SupabaseClient get _db => Supabase.instance.client;
+
   StoreProvider() {
     fetchStores();
   }
 
-  // Helper to sanitize image URLs - removes placeholder URLs
-  String _sanitizeImageUrl(String? url) {
-    if (url == null || url.isEmpty) return '';
-    if (url.contains('via.placeholder.com')) return '';
-    return url;
-  }
-
   Store? _selectedStore;
-
   Store? get selectedStore => _selectedStore;
 
-  // Method to set the selected store
   void selectStore(Store store) {
-  _selectedStore = store;
-  notifyListeners();
+    _selectedStore = store;
+    notifyListeners();
   }
 
+  void _notifyLater() {
+    WidgetsBinding.instance.addPostFrameCallback((_) => notifyListeners());
+  }
 
-  /// Fetch stores from Firestore
+  /// Loads every store with its products, videos, ratings and owner.
   Future<void> fetchStores() async {
     isLoading = true;
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      notifyListeners(); // Notify after the current frame
-    });
+    _notifyLater();
 
     try {
-      QuerySnapshot storeSnapshot = await FirebaseFirestore.instance.collection('stores').get();
-      print('📦 Fetched ${storeSnapshot.docs.length} store documents from Firestore');
-
-      List<Store> fetchedStores = [];
-      for (var doc in storeSnapshot.docs) {
+      final rows = await _db.from('stores').select(kStoreSelect).order('created_at');
+      final fetched = <Store>[];
+      for (final row in rows as List) {
         try {
-          Store store = await _storeFromFirestore(doc);
-          fetchedStores.add(store);
+          fetched.add(Store.fromRow(row));
         } catch (e) {
-          print('⚠️ Error parsing store ${doc.id}: $e');
-          // Continue with other stores instead of failing completely
+          print('Error parsing store ${row['id']}: $e');
         }
       }
-
-      _stores = fetchedStores;
-      print('✅ Successfully loaded ${_stores.length} stores');
-
-      isLoading = false;
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        notifyListeners(); // Notify after fetching completes
-      });
+      _stores = fetched;
     } catch (e) {
-      print('❌ Error fetching stores: $e');
+      print('Error fetching stores: $e');
+    } finally {
       isLoading = false;
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        notifyListeners(); // Notify even if an error occurs
-      });
+      _notifyLater();
     }
   }
 
   Future<List<Product>> fetchProductsForStore(String storeId) async {
-    // Fetch products from the "products" sub-collection under the store
-    QuerySnapshot productSnapshot = await FirebaseFirestore.instance
-        .collection('stores')
-        .doc(storeId)
-        .collection('products')
-        .get();
-
-    // Map product documents to a list of Product objects
-    return productSnapshot.docs.map((productDoc) {
-      Map<String, dynamic> productData = productDoc.data() as Map<String, dynamic>;
-      return Product(
-        id: productDoc.id,
-        name: productData['name'],
-        description: productData['description'],
-        price: productData['price'].toDouble(),
-        rating: productData['rating'].toDouble(),
-        imageUrl: _sanitizeImageUrl(productData['imageUrl']),
-      );
-    }).toList();
+    final rows = await _db.from('products').select().eq('store_id', storeId);
+    return (rows as List).map((r) => Product.fromRow(r)).toList();
   }
+
   Future<Store?> getStoreById(String storeId) async {
     if (storeId.isEmpty) {
       print('Error: storeId is empty');
-      return null; // Return early if storeId is empty
+      return null;
     }
-
     try {
-      // Fetch the store document from Firestore
-      final storeDoc = await FirebaseFirestore.instance.collection('stores').doc(storeId).get();
-
-      if (storeDoc.exists) {
-        // Use the private helper method to properly fetch products from subcollection
-        return await _storeFromFirestore(storeDoc);
-      } else {
-        print('Error: Store not found for storeId: $storeId');
-        return null; // Return null if the store document does not exist
-      }
+      final row =
+          await _db.from('stores').select(kStoreSelect).eq('id', storeId).maybeSingle();
+      return row == null ? null : Store.fromRow(row);
     } catch (e) {
-      print("Error fetching store for storeId $storeId: $e");
-      throw Exception("Failed to fetch store data."); // Throw a more specific error
+      print('Error fetching store for storeId $storeId: $e');
+      throw Exception('Failed to fetch store data.');
     }
   }
 
+  Future<Store?> fetchStore(String storeId) async {
+    if (storeId.isEmpty) {
+      print('Cannot fetch store: Store ID is empty');
+      return null;
+    }
+    try {
+      return await getStoreById(storeId);
+    } catch (e) {
+      print('Error fetching store data: $e');
+      return null;
+    }
+  }
 
   Future<void> addStore(Store newStore, CustomUserProvider userProvider) async {
     try {
-      // Step 1: Add the new store to Firestore
-      DocumentReference storeRef = await FirebaseFirestore.instance.collection('stores').add(newStore.toMap());
-      newStore.id = storeRef.id; // Assign generated document ID to store
-
-      // Step 2: Update the current user's store property
-      if (userProvider.user != null) {
-        userProvider.user!.store = newStore;
-
-        // Step 3: Save the updated user details in Firestore
-        await userProvider.saveUserDetails(userProvider.user!);
-      }
-
-      // Step 4: Refresh the stores list to reflect the changes
+      final row = await _db.from('stores').insert(newStore.toRow()).select('id').single();
+      newStore.id = row['id'] as String;
+      await userProvider.fetchUserDetails();
       await fetchStores();
     } catch (e) {
       print('Error adding store: $e');
     }
   }
 
-
-
-  // Edit an existing store and update the user's store details
-  Future<void> editStore(String storeId, Store updatedStore, CustomUserProvider userProvider) async {
+  Future<void> editStore(
+      String storeId, Store updatedStore, CustomUserProvider userProvider) async {
     try {
-      // Update the store document in Firestore
-      await FirebaseFirestore.instance.collection('stores').doc(storeId).update(updatedStore.toMap());
-
-      // If the user's store is being updated, reflect the changes
-      if (userProvider.user?.store != null && userProvider.user!.store!.id == storeId) {
-        userProvider.user!.store = updatedStore;
-
-        // Save the updated user store in Firestore
-        await userProvider.saveUserDetails(userProvider.user!);
-      }
-
-      // Refresh the stores list after editing
+      final row = updatedStore.toRow()
+        ..remove('id')
+        ..remove('owner_id'); // ownership never changes through an edit
+      await _db.from('stores').update(row).eq('id', storeId);
+      await userProvider.fetchUserDetails();
       await fetchStores();
     } catch (e) {
       print('Error editing store: $e');
     }
   }
 
-  // Delete a store and update the user's store information
+  /// Deletes a store; products, videos and ratings cascade in the database.
   Future<void> deleteStore(String storeId, CustomUserProvider userProvider) async {
     try {
-      // Ensure storeId is not empty or null
       if (storeId.isEmpty) {
-        throw Exception("Store ID cannot be empty or null.");
+        throw Exception('Store ID cannot be empty or null.');
       }
-
-      // Debug print to check the storeId
-      print("Deleting store with ID: $storeId");
-
-      // Delete all the products under the store first
-      QuerySnapshot productSnapshot = await FirebaseFirestore.instance
-          .collection('stores')
-          .doc(storeId)
-          .collection('products')
-          .get();
-
-      for (var productDoc in productSnapshot.docs) {
-        await productDoc.reference.delete();
-      }
-
-      // Delete the store document from Firestore
-      await FirebaseFirestore.instance.collection('stores').doc(storeId).delete();
-
-      // If the user's store is being deleted, remove the store from the user
-      if (userProvider.user?.store != null && userProvider.user!.store!.id == storeId) {
+      await _db.from('stores').delete().eq('id', storeId);
+      if (userProvider.user?.store?.id == storeId) {
         userProvider.user!.store = null;
-
-        // Save the updated user details in Firestore
-        await userProvider.saveUserDetails(userProvider.user!);
       }
-
-      // Refresh the stores list after deleting
       await fetchStores();
     } catch (e) {
       print('Error deleting store: $e');
     }
   }
 
-
-  /// Add a new product to the store
-  /// Add a new product to the store and update the user's store
-  Future<void> addProduct(String storeId, Product newProduct, CustomUserProvider userProvider, BuildContext context) async {
+  Future<void> addProduct(String storeId, Product newProduct,
+      CustomUserProvider userProvider, BuildContext context) async {
     try {
       if (storeId.isEmpty) {
         throw Exception('Store ID cannot be empty.');
       }
-      // Step 1: Add product to Firestore and get the document reference
-      DocumentReference productRef = await FirebaseFirestore.instance
-          .collection('stores')
-          .doc(storeId)
-          .collection('products')
-          .add(newProduct.toMap());
+      final row = await _db
+          .from('products')
+          .insert(newProduct.toRow(storeId)..remove('id'))
+          .select('id')
+          .single();
+      newProduct.id = row['id'] as String;
 
-      // Step 2: Assign Firestore-generated ID to the product
-      newProduct.id = productRef.id;
-
-      // Step 3: Update the CustomUser's store with the new product
-      if (userProvider.user?.store != null && userProvider.user!.store!.id == storeId) {
-        // Add the new product to the user's store products list
-        userProvider.user!.store!.products.add(newProduct);
-
-        // Step 4: Save the updated user details in Firestore
-        await userProvider.saveUserDetails(userProvider.user!);
-
-        // Optionally, update the user's store in Firestore with the new product list (this is done automatically by saveUserDetails)
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userProvider.user!.id) // Assuming user's ID is available in userProvider
-            .update({
-          'store.products': userProvider.user!.store!.products.map((product) => product.toMap()).toList(),
-        });
-      }
-
-      // Step 5: Optionally refresh the stores list after adding the product
+      await userProvider.fetchUserDetails();
       await fetchStores();
-
     } catch (e) {
       print('Error adding product: $e');
-      // Optionally display the error on the UI with a SnackBar
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to add product: $e')),
-      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to add product: $e')),
+        );
+      }
     }
   }
 
-
-
-// Edit an existing product
-  Future<void> editProduct(String storeId, Product updatedProduct, CustomUserProvider userProvider) async {
+  Future<void> editProduct(
+      String storeId, Product updatedProduct, CustomUserProvider userProvider) async {
     try {
-      // Update the product in Firestore
-      await FirebaseFirestore.instance
-          .collection('stores')
-          .doc(storeId)
-          .collection('products')
-          .doc(updatedProduct.id)
-          .update(updatedProduct.toMap());
-
-      // If the user's store is being updated, reflect the changes in the user's store
-      if (userProvider.user?.store != null && userProvider.user!.store!.id == storeId) {
-        int productIndex = userProvider.user!.store!.products.indexWhere((prod) => prod.id == updatedProduct.id);
-        if (productIndex != -1) {
-          userProvider.user!.store!.products[productIndex] = updatedProduct;
-
-          // Save the updated user store in Firestore
-          await userProvider.saveUserDetails(userProvider.user!);
-        }
-      }
-
-      // Optionally refresh the stores list after editing
+      final row = updatedProduct.toRow(storeId)..remove('id');
+      await _db.from('products').update(row).eq('id', updatedProduct.id);
+      await userProvider.fetchUserDetails();
       fetchStores();
     } catch (e) {
       print('Error editing product: $e');
     }
   }
 
-// Delete an existing product from a store and update the user's store
-  Future<void> deleteProduct(String storeId, String productId, CustomUserProvider userProvider) async {
+  Future<void> deleteProduct(
+      String storeId, String productId, CustomUserProvider userProvider) async {
     try {
-      // Delete the product from Firestore
-      await FirebaseFirestore.instance
-          .collection('stores')
-          .doc(storeId)
-          .collection('products')
-          .doc(productId)
-          .delete();
-
-      // If the user's store is being updated, reflect the deletion in the user's store
-      if (userProvider.user?.store != null && userProvider.user!.store!.id == storeId) {
-        // Remove the product from the user's store
-        userProvider.user!.store!.products.removeWhere((prod) => prod.id == productId);
-
-        // Save the updated user store in Firestore
-        await userProvider.saveUserDetails(userProvider.user!);
-      }
-
-      // Optionally refresh the stores list after deleting
+      await _db.from('products').delete().eq('id', productId);
+      await userProvider.fetchUserDetails();
       fetchStores();
     } catch (e) {
       print('Error deleting product: $e');
     }
   }
+
   Future<List<Payment>> fetchPaymentsForStoreByOwner(String userId, String storeId) async {
     try {
-      // Fetch payments from the 'payments' subcollection under the specific user
-      QuerySnapshot<Map<String, dynamic>> paymentSnapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .collection('payments')
-          .where('storeId', isEqualTo: storeId) // Filter by storeId
-          .get();
-
-      // Map the documents to Payment objects
-      List<Payment> payments = paymentSnapshot.docs.map((doc) {
-        return Payment.fromMap(doc.data());
-      }).toList();
-
-      return payments;
+      final rows = await _db
+          .from('payments')
+          .select()
+          .eq('user_id', userId)
+          .eq('store_id', storeId);
+      return (rows as List).map((r) => Payment.fromRow(r)).toList();
     } catch (e) {
       print('Error fetching payments for user $userId: $e');
       return [];
     }
   }
 
-  Future<Store?> fetchStore(String storeId) async {
-    // Check if storeId is valid before querying
-    if (storeId.isEmpty) {
-      print('Cannot fetch store: Store ID is empty');
-      return null;
-    }
+  // ---------------------------------------------------------------- videos
 
-    try {
-      DocumentSnapshot<Map<String, dynamic>> snapshot = await FirebaseFirestore.instance
-          .collection('stores')
-          .doc(storeId)
-          .get();
-
-      if (snapshot.exists) {
-        // Use the private helper method to properly fetch products from subcollection
-        return await _storeFromFirestore(snapshot);
-      }
-    } catch (e) {
-      print('Error fetching store data: $e');
-    }
-    return null;
-  }
-
-
-  /// Helper method to map Firestore document to a Store object
-  Future<Store> _storeFromFirestore(DocumentSnapshot doc) async {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-
-    // Owner data - with null safety
-    final ownerData = data['owner'] as Map<String, dynamic>?;
-    Owner owner = Owner(
-      id: ownerData?['id'] ?? '',
-      name: ownerData?['name'] ?? '',
-      email: ownerData?['email'] ?? '',
-      phone: ownerData?['phone'] ?? '',
-      profileImageUrl: _sanitizeImageUrl(ownerData?['profileImageUrl']),
-    );
-
-    // Step 1: Fetch products for this store from the "products" sub-collection
-    List<Product> products = [];
-    QuerySnapshot productSnapshot = await FirebaseFirestore.instance
-        .collection('stores')
-        .doc(doc.id)
-        .collection('products') // Access the "products" sub-collection
-        .get();
-
-    // Step 2: Map the fetched documents to a list of Product objects
-    products = productSnapshot.docs.map((productDoc) {
-      Map<String, dynamic> productData = productDoc.data() as Map<String, dynamic>;
-      return Product(
-        id: productDoc.id,
-        name: productData['name'] ?? '',
-        description: productData['description'] ?? '',
-        price: (productData['price'] ?? 0).toDouble(), // Handle missing or incorrect data
-        rating: (productData['rating'] ?? 0).toDouble(),
-        imageUrl: _sanitizeImageUrl(productData['imageUrl']),
-      );
-    }).toList();
-
-    // Step 3: Return the fully populated store, adding default values if fields are missing
-    return Store(
-      id: doc.id,
-      name: data['name'] ?? '',
-      phoneNumber: data['phoneNumber'] ?? '',
-      description: data['description'] ?? '',
-      category: data['category'] ?? '',
-      imageUrl: _sanitizeImageUrl(data['imageUrl']),
-      owner: owner,
-      products: products, // Attach fetched products to the store
-      location: data['location'] ?? GeoPoint(0, 0), // Default location if missing
-      deliveryOptions: data['deliveryOptions'] != null
-          ? List<String>.from(data['deliveryOptions'])
-          : [], // Default empty list if missing
-      deliveryCost: (data['deliveryCost'] ?? 0).toDouble(), // Default cost if missing
-    );
-  }
-
-
-// Add a new YouTube video to a store
   Future<void> addVideo(String storeId, String videoUrl) async {
     try {
       final videoId = YoutubePlayer.convertUrlToId(videoUrl);
       if (videoId != null) {
-        YouTubeVideo newVideo = YouTubeVideo(id: videoId, url: videoUrl);
-        await FirebaseFirestore.instance.collection('stores').doc(storeId).update({
-          'videos': FieldValue.arrayUnion([newVideo.toMap()])
-        });
+        await _db.from('store_videos').insert({'store_id': storeId, 'url': videoUrl});
         notifyListeners();
       } else {
         print('Invalid YouTube URL');
@@ -425,52 +204,42 @@ class StoreProvider with ChangeNotifier {
     }
   }
 
-  // Edit an existing YouTube video
+  /// [videoId] is the id of the `store_videos` row (see [YouTubeVideo.id]).
   Future<void> editVideo(String storeId, String videoId, String newUrl) async {
     try {
-      YouTubeVideo updatedVideo = YouTubeVideo(id: videoId, url: newUrl);
-      await FirebaseFirestore.instance.collection('stores').doc(storeId).update({
-        'videos': FieldValue.arrayRemove([{'id': videoId}]), // Remove old video
-      });
-      await FirebaseFirestore.instance.collection('stores').doc(storeId).update({
-        'videos': FieldValue.arrayUnion([updatedVideo.toMap()]), // Add updated video
-      });
+      await _db
+          .from('store_videos')
+          .update({'url': newUrl})
+          .eq('id', videoId)
+          .eq('store_id', storeId);
       notifyListeners();
     } catch (e) {
       print('Error editing video: $e');
     }
   }
 
-  // Delete a YouTube video
   Future<void> deleteVideo(String storeId, YouTubeVideo video) async {
     try {
-      await FirebaseFirestore.instance.collection('stores').doc(storeId).update({
-        'videos': FieldValue.arrayRemove([video.toMap()])
-      });
+      await _db.from('store_videos').delete().eq('id', video.id).eq('store_id', storeId);
       notifyListeners();
     } catch (e) {
       print('Error deleting video: $e');
     }
   }
-// Fetch owner details by storeId
+
+  // ---------------------------------------------------------------- owner / chats
+
   Future<CustomUser?> fetchOwnerByStoreId(String storeId) async {
     try {
-      // The store document records its owner's uid; read that user directly
-      // (security rules do not allow querying the users collection).
-      final storeDoc = await FirebaseFirestore.instance
-          .collection('stores')
-          .doc(storeId)
-          .get();
-      final ownerId = (storeDoc.data()?['owner'] as Map<String, dynamic>?)?['id'] as String?;
+      final store =
+          await _db.from('stores').select('owner_id').eq('id', storeId).maybeSingle();
+      final ownerId = store?['owner_id'] as String?;
       if (ownerId == null || ownerId.isEmpty) {
         print('No owner found for storeId: $storeId');
         return null;
       }
-      final ownerDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(ownerId)
-          .get();
-      return ownerDoc.exists ? CustomUser.fromDocument(ownerDoc) : null;
+      final owner = await _db.from('profiles').select().eq('id', ownerId).maybeSingle();
+      return owner == null ? null : CustomUser.fromRow(owner);
     } catch (e) {
       print('Error fetching owner by storeId: $e');
       return null;
@@ -478,43 +247,33 @@ class StoreProvider with ChangeNotifier {
   }
 
   Future<String?> findChatId(String customerId, String storeId) async {
-    QuerySnapshot snapshot = await FirebaseFirestore.instance
-        .collection('chats')
-        .where('participants', arrayContains: customerId)
-        .get();
-
-    for (var doc in snapshot.docs) {
-      List participants = doc['participants'];
-      if (participants.contains(storeId)) {
-        return doc.id;
-      }
-    }
-    return null; // No chat found
+    final row = await _db
+        .from('chats')
+        .select('id')
+        .eq('user_id', customerId)
+        .eq('store_id', storeId)
+        .maybeSingle();
+    return row?['id'] as String?;
   }
+
   Future<List<Map<String, dynamic>>> fetchUserChatsForOwner(String storeId) async {
     try {
-      QuerySnapshot snapshot = await FirebaseFirestore.instance
-          .collection('chats')
-          .where('participants', arrayContains: storeId)
-          .orderBy('lastUpdated', descending: true)
-          .get();
-
-      // Parse chat metadata and return user details
-      return snapshot.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        final participants = data['participants'] as List<dynamic>;
-        final customerId = participants.firstWhere((id) => id != storeId);
-        return {
-          'chatId': doc.id,
-          'customerId': customerId,
-          'lastMessage': data['lastMessage'] ?? '',
-          'lastUpdated': data['lastUpdated'] ?? Timestamp.now(),
-        };
-      }).toList();
+      final rows = await _db
+          .from('chats')
+          .select()
+          .eq('store_id', storeId)
+          .order('last_updated', ascending: false);
+      return (rows as List)
+          .map((r) => {
+                'chatId': r['id'],
+                'customerId': r['user_id'],
+                'lastMessage': r['last_message'] ?? '',
+                'lastUpdated': Timestamp.parse(r['last_updated']),
+              })
+          .toList();
     } catch (e) {
-      print("Error fetching chats for owner: $e");
+      print('Error fetching chats for owner: $e');
       return [];
     }
   }
-
 }
