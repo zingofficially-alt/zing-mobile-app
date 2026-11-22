@@ -695,7 +695,7 @@ class _HomePageScreenState extends State<HomePageScreen> with TickerProviderStat
 
 class _CategoryItem {
   final String name;
-  final IconData icon;
+  final FaIconData icon;
   final Color color;
   final Color bgColor;
   const _CategoryItem(this.name, this.icon, this.color, this.bgColor);

@@ -482,7 +482,7 @@ class _SearchExploreScreenState extends State<SearchExploreScreen> with SingleTi
 
 class _CategoryData {
   final String name;
-  final IconData icon;
+  final FaIconData icon;
   final Color color;
   const _CategoryData(this.name, this.icon, this.color);
 }
