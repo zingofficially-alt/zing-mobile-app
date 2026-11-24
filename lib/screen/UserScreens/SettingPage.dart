@@ -1,23 +1,28 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:zing/Service/PushService.dart';
+import 'package:zing/Widgets/Shared/zing_ios.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:zing/Service/ApiClient.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'package:share_plus/share_plus.dart';
-import '../../Service/ThameProvider.dart';
-import '../../Service/ThemeProvider.dart';
-import '../../Service/CoustomUserProvider.dart';
+import 'package:zing/Service/ThameProvider.dart';
+import 'package:zing/Service/ThemeProvider.dart';
+import 'package:zing/Service/CoustomUserProvider.dart';
 
 class SettingsPage extends StatefulWidget {
+  const SettingsPage({super.key});
+
   @override
-  _SettingsPageState createState() => _SettingsPageState();
+  State<SettingsPage> createState() => _SettingsPageState();
 }
 
 class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderStateMixin {
   bool _notificationsEnabled = true;
-  bool _showCurrentPassword = false;
-  bool _showNewPassword = false;
+  final bool _showCurrentPassword = false;
+  final bool _showNewPassword = false;
   bool _isLoading = false;
 
   late AnimationController _animationController;
@@ -25,6 +30,9 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
   @override
   void initState() {
     super.initState();
+    PushService.isEnabled().then((v) {
+      if (mounted) setState(() => _notificationsEnabled = v);
+    });
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
@@ -43,9 +51,9 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
     final TextEditingController currentPasswordController = TextEditingController();
     final TextEditingController newPasswordController = TextEditingController();
     final TextEditingController confirmPasswordController = TextEditingController();
-    final _formKey = GlobalKey<FormState>();
-    bool _localShowCurrentPassword = false;
-    bool _localShowNewPassword = false;
+    final formKey = GlobalKey<FormState>();
+    bool localShowCurrentPassword = false;
+    bool localShowNewPassword = false;
 
     await showDialog(
       context: context,
@@ -66,7 +74,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: cs.primary.withOpacity(0.1),
+                          color: cs.primary.withValues(alpha: 0.1),
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
@@ -89,13 +97,13 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
 
                   // Form fields
                   Form(
-                    key: _formKey,
+                    key: formKey,
                     child: Column(
                       children: [
                         // Current password field
                         TextFormField(
                           controller: currentPasswordController,
-                          obscureText: !_localShowCurrentPassword,
+                          obscureText: !localShowCurrentPassword,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: cs.onSurface,
                           ),
@@ -126,14 +134,14 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                             ),
                             suffixIcon: IconButton(
                               icon: Icon(
-                                _localShowCurrentPassword
+                                localShowCurrentPassword
                                     ? Icons.visibility_off
                                     : Icons.visibility,
                                 color: cs.onSurfaceVariant,
                               ),
                               onPressed: () {
                                 setState(() {
-                                  _localShowCurrentPassword = !_localShowCurrentPassword;
+                                  localShowCurrentPassword = !localShowCurrentPassword;
                                 });
                               },
                             ),
@@ -153,7 +161,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                         // New password field
                         TextFormField(
                           controller: newPasswordController,
-                          obscureText: !_localShowNewPassword,
+                          obscureText: !localShowNewPassword,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: cs.onSurface,
                           ),
@@ -184,14 +192,14 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                             ),
                             suffixIcon: IconButton(
                               icon: Icon(
-                                _localShowNewPassword
+                                localShowNewPassword
                                     ? Icons.visibility_off
                                     : Icons.visibility,
                                 color: cs.onSurfaceVariant,
                               ),
                               onPressed: () {
                                 setState(() {
-                                  _localShowNewPassword = !_localShowNewPassword;
+                                  localShowNewPassword = !localShowNewPassword;
                                 });
                               },
                             ),
@@ -211,7 +219,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                         // Confirm password field
                         TextFormField(
                           controller: confirmPasswordController,
-                          obscureText: !_localShowNewPassword,
+                          obscureText: !localShowNewPassword,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: cs.onSurface,
                           ),
@@ -268,7 +276,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                               borderRadius: BorderRadius.circular(12),
                             ),
                             foregroundColor: cs.onSurfaceVariant,
-                            side: BorderSide(color: cs.onSurfaceVariant.withOpacity(0.5)),
+                            side: BorderSide(color: cs.onSurfaceVariant.withValues(alpha: 0.5)),
                           ),
                           child: Text(
                             'Cancel',
@@ -285,7 +293,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                       Expanded(
                         child: ElevatedButton(
                           onPressed: () async {
-                            if (_formKey.currentState!.validate()) {
+                            if (formKey.currentState!.validate()) {
                               Navigator.of(context).pop();
                               await _updatePassword(
                                 currentPasswordController.text.trim(),
@@ -360,8 +368,8 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
     final cs = theme.colorScheme;
     final TextEditingController newEmailController = TextEditingController();
     final TextEditingController passwordController = TextEditingController();
-    final _formKey = GlobalKey<FormState>();
-    bool _showPassword = false;
+    final formKey = GlobalKey<FormState>();
+    bool showPassword = false;
 
     await showDialog(
       context: context,
@@ -382,7 +390,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: cs.tertiary.withOpacity(0.1),
+                          color: cs.tertiary.withValues(alpha: 0.1),
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
@@ -405,7 +413,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
 
                   // Form fields
                   Form(
-                    key: _formKey,
+                    key: formKey,
                     child: Column(
                       children: [
                         // New email field
@@ -462,7 +470,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                         // Password field for re-authentication
                         TextFormField(
                           controller: passwordController,
-                          obscureText: !_showPassword,
+                          obscureText: !showPassword,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: cs.onSurface,
                           ),
@@ -493,14 +501,14 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                             ),
                             suffixIcon: IconButton(
                               icon: Icon(
-                                _showPassword
+                                showPassword
                                     ? Icons.visibility_off
                                     : Icons.visibility,
                                 color: cs.onSurfaceVariant,
                               ),
                               onPressed: () {
                                 setState(() {
-                                  _showPassword = !_showPassword;
+                                  showPassword = !showPassword;
                                 });
                               },
                             ),
@@ -524,12 +532,12 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: ZingColors.warning.withOpacity(0.1),
+                      color: ZingColors.warning.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
                       children: [
-                        Icon(
+                        const Icon(
                           Icons.info_outline,
                           color: ZingColors.warning,
                           size: 20,
@@ -561,7 +569,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                               borderRadius: BorderRadius.circular(12),
                             ),
                             foregroundColor: cs.onSurfaceVariant,
-                            side: BorderSide(color: cs.onSurfaceVariant.withOpacity(0.5)),
+                            side: BorderSide(color: cs.onSurfaceVariant.withValues(alpha: 0.5)),
                           ),
                           child: Text(
                             'Cancel',
@@ -578,7 +586,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                       Expanded(
                         child: ElevatedButton(
                           onPressed: () async {
-                            if (_formKey.currentState!.validate()) {
+                            if (formKey.currentState!.validate()) {
                               Navigator.of(context).pop();
                               await _updateEmail(
                                 newEmailController.text.trim(),
@@ -633,6 +641,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
             .update({'email': newEmail}).eq('id', user.id);
 
         // Update the user provider
+        if (!mounted) return;
         final userProvider = Provider.of<CustomUserProvider>(context, listen: false);
         await userProvider.fetchUserDetails();
 
@@ -739,7 +748,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                   color: cs.tertiary,
                   onTap: () {
                     Navigator.pop(context);
-                    Clipboard.setData(ClipboardData(text: appLink));
+                    Clipboard.setData(const ClipboardData(text: appLink));
                     _showSuccessSnackBar('App link copied to clipboard');
                   },
                 ),
@@ -772,7 +781,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
             width: 60,
             height: 60,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
+              color: color.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(
@@ -841,7 +850,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: cs.error.withOpacity(0.1),
+                  color: cs.error.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
@@ -877,10 +886,10 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: cs.error.withOpacity(0.05),
+                  color: cs.error.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: cs.error.withOpacity(0.2),
+                    color: cs.error.withValues(alpha: 0.2),
                   ),
                 ),
                 child: Column(
@@ -900,7 +909,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: ZingColors.warning.withOpacity(0.1),
+                  color: ZingColors.warning.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
@@ -925,7 +934,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                           borderRadius: BorderRadius.circular(12),
                         ),
                         foregroundColor: cs.onSurfaceVariant,
-                        side: BorderSide(color: cs.onSurfaceVariant.withOpacity(0.5)),
+                        side: BorderSide(color: cs.onSurfaceVariant.withValues(alpha: 0.5)),
                       ),
                       child: Text(
                         'Cancel',
@@ -1045,8 +1054,8 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final TextEditingController passwordController = TextEditingController();
-    final _formKey = GlobalKey<FormState>();
-    bool _showPassword = false;
+    final formKey = GlobalKey<FormState>();
+    bool showPassword = false;
 
     return await showDialog<bool>(
       context: context,
@@ -1065,10 +1074,10 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: ZingColors.warning.withOpacity(0.1),
+                      color: ZingColors.warning.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(
+                    child: const Icon(
                       Icons.security,
                       color: ZingColors.warning,
                       size: 28,
@@ -1098,10 +1107,10 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                   const SizedBox(height: 24),
 
                   Form(
-                    key: _formKey,
+                    key: formKey,
                     child: TextFormField(
                       controller: passwordController,
-                      obscureText: !_showPassword,
+                      obscureText: !showPassword,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: cs.onSurface,
                       ),
@@ -1132,14 +1141,14 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                         ),
                         suffixIcon: IconButton(
                           icon: Icon(
-                            _showPassword
+                            showPassword
                                 ? Icons.visibility_off
                                 : Icons.visibility,
                             color: cs.onSurfaceVariant,
                           ),
                           onPressed: () {
                             setState(() {
-                              _showPassword = !_showPassword;
+                              showPassword = !showPassword;
                             });
                           },
                         ),
@@ -1168,7 +1177,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                               borderRadius: BorderRadius.circular(12),
                             ),
                             foregroundColor: cs.onSurfaceVariant,
-                            side: BorderSide(color: cs.onSurfaceVariant.withOpacity(0.5)),
+                            side: BorderSide(color: cs.onSurfaceVariant.withValues(alpha: 0.5)),
                           ),
                           child: Text(
                             'Cancel',
@@ -1185,7 +1194,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                       Expanded(
                         child: ElevatedButton(
                           onPressed: () async {
-                            if (_formKey.currentState!.validate()) {
+                            if (formKey.currentState!.validate()) {
                               try {
                                 // Re-authenticate the user
                                 await Supabase.instance.client.auth.signInWithPassword(
@@ -1311,27 +1320,12 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
-    final screenWidth = MediaQuery.of(context).size.width;
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
 
     return Scaffold(
-      backgroundColor: cs.surface,
       appBar: AppBar(
-        elevation: 0,
-        title: Text('Settings'),
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(
-            Icons.arrow_back_ios_new_rounded,
-            size: 20,
-          ),
-          onPressed: () => Navigator.pop(context),
-        ),
-        systemOverlayStyle: const SystemUiOverlayStyle(
-          statusBarColor: Colors.transparent,
-          statusBarIconBrightness: Brightness.light,
-        ),
+        title: const Text('Settings'),
       ),
       body: Stack(
         children: [
@@ -1339,7 +1333,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
           SafeArea(
             child: AnimationLimiter(
               child: ListView(
-                padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
                 children: [
                   // Account section
                   _buildSectionTitle('Account', Icons.person_outline),
@@ -1361,7 +1355,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                     ),
                   ),
 
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 8),
 
                   AnimationConfiguration.staggeredList(
                     position: 1,
@@ -1380,7 +1374,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                     ),
                   ),
 
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 28),
 
                   // Preferences section
                   _buildSectionTitle('Preferences', Icons.settings_outlined),
@@ -1394,20 +1388,21 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                       child: FadeInAnimation(
                         child: _buildSwitchCard(
                           title: 'Notifications',
-                          subtitle: 'Receive push notifications',
+                          subtitle: 'Order updates on this device',
                           icon: Icons.notifications_outlined,
                           iconColor: cs.tertiary,
                           value: _notificationsEnabled,
                           onChanged: (value) {
                             setState(() => _notificationsEnabled = value);
                             HapticFeedback.lightImpact();
+                            PushService.setEnabled(value);
                           },
                         ),
                       ),
                     ),
                   ),
 
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 8),
 
                   AnimationConfiguration.staggeredList(
                     position: 3,
@@ -1436,7 +1431,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                     ),
                   ),
 
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 28),
 
                   // About section
                   _buildSectionTitle('About', Icons.info_outline),
@@ -1459,7 +1454,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                     ),
                   ),
 
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 8),
 
                   AnimationConfiguration.staggeredList(
                     position: 5,
@@ -1479,7 +1474,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                     ),
                   ),
 
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 28),
 
                   // Share section
                   _buildSectionTitle('Share', Icons.share_outlined),
@@ -1502,7 +1497,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                     ),
                   ),
 
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 28),
 
                   // Account actions section
                   _buildSectionTitle('Account Actions', Icons.manage_accounts_outlined),
@@ -1528,7 +1523,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                     ),
                   ),
 
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 8),
 
                   AnimationConfiguration.staggeredList(
                     position: 8,
@@ -1559,7 +1554,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
           if (_isLoading)
             Positioned.fill(
               child: Container(
-                color: Colors.black.withOpacity(0.5),
+                color: Colors.black.withValues(alpha: 0.5),
                 child: Center(
                   child: Container(
                     padding: const EdgeInsets.all(24),
@@ -1573,7 +1568,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                         CircularProgressIndicator(
                           color: cs.primary,
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 8),
                         Text(
                           'Please wait...',
                           style: theme.textTheme.titleLarge?.copyWith(
@@ -1593,30 +1588,17 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
 
   // Section title widget
   Widget _buildSectionTitle(String title, IconData icon) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
+    final cs = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12, left: 8),
-      child: Row(
-        children: [
-          Icon(
-            icon,
-            size: 20,
-            color: cs.primary,
-          ),
-          const SizedBox(width: 8),
-          Text(
-            title,
-            style: theme.textTheme.headlineSmall?.copyWith(
-              color: cs.onSurface,
-            ),
-          ),
-        ],
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 7),
+      child: Text(
+        title.toUpperCase(),
+        style: ZingType.footnote(cs.onSurfaceVariant).copyWith(letterSpacing: 0.2),
       ),
     );
   }
 
-  // Setting card widget
+  // One iOS settings cell.
   Widget _buildSettingCard({
     required String title,
     required String subtitle,
@@ -1625,80 +1607,24 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
     required VoidCallback onTap,
     bool isDestructive = false,
   }) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 0),
-      decoration: BoxDecoration(
+    final cs = Theme.of(context).colorScheme;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(ZingRadius.md),
+      child: ColoredBox(
         color: cs.surface,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: ZingShadows.soft,
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () {
-            HapticFeedback.mediumImpact();
-            onTap();
-          },
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                // Icon
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: iconColor.withOpacity(0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    icon,
-                    color: iconColor,
-                    size: 22,
-                  ),
-                ),
-
-                const SizedBox(width: 16),
-
-                // Text content
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          color: isDestructive ? cs.error : cs.onSurface,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        subtitle,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: cs.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Arrow icon
-                Icon(
-                  Icons.arrow_forward_ios,
-                  color: cs.onSurfaceVariant,
-                  size: 16,
-                ),
-              ],
-            ),
-          ),
+        child: ZingListRow(
+          icon: icon,
+          iconColor: isDestructive ? ZingColors.error : iconColor,
+          title: title,
+          subtitle: subtitle,
+          destructive: isDestructive,
+          onTap: onTap,
         ),
       ),
     );
   }
 
-  // Switch card widget
+  // Settings cell with an iOS switch.
   Widget _buildSwitchCard({
     required String title,
     required String subtitle,
@@ -1707,65 +1633,21 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
     required bool value,
     required Function(bool) onChanged,
   }) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 0),
-      decoration: BoxDecoration(
+    final cs = Theme.of(context).colorScheme;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(ZingRadius.md),
+      child: ColoredBox(
         color: cs.surface,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: ZingShadows.soft,
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            // Icon
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: iconColor.withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                icon,
-                color: iconColor,
-                size: 22,
-              ),
-            ),
-
-            const SizedBox(width: 16),
-
-            // Text content
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      color: cs.onSurface,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: cs.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Switch
-            Switch(
-              value: value,
-              onChanged: onChanged,
-              activeColor: cs.primary,
-              activeTrackColor: cs.primary.withOpacity(0.3),
-            ),
-          ],
+        child: ZingListRow(
+          icon: icon,
+          iconColor: iconColor,
+          title: title,
+          subtitle: subtitle,
+          trailing: CupertinoSwitch(
+            value: value,
+            activeTrackColor: ZingColors.success,
+            onChanged: onChanged,
+          ),
         ),
       ),
     );

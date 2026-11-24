@@ -9,10 +9,11 @@ import 'package:zing/AdminPanal/ManageUser.dart';
 import 'package:zing/AdminPanal/AddAdminScreen.dart';
 import 'package:zing/AdminPanal/AdminUpdateRegitrationAmount.dart';
 import 'package:zing/AdminPanal/ManageOffer.dart';
-import 'package:zing/AdminPanal/ManageAdvertisement.dart';
 import 'package:zing/Service/ThemeProvider.dart';
 
 class EnhancedAdminPanelDashboard extends StatefulWidget {
+  const EnhancedAdminPanelDashboard({super.key});
+
   @override
   State<EnhancedAdminPanelDashboard> createState() => _EnhancedAdminPanelDashboardState();
 }
@@ -229,7 +230,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: cs.primary.withOpacity(0.3),
+                  color: cs.primary.withValues(alpha: 0.3),
                   blurRadius: 8,
                   offset: const Offset(0, 4),
                 ),
@@ -362,7 +363,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
-              color: cs.error.withOpacity(0.1),
+              color: cs.error.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
@@ -412,7 +413,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
                     width: 48,
                     height: 48,
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
+                      color: Colors.white.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Center(
@@ -441,7 +442,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
                       Text(
                         'Manage your application',
                         style: TextStyle(
-                          color: cs.onPrimary.withOpacity(0.7),
+                          color: cs.onPrimary.withValues(alpha: 0.7),
                           fontSize: 14,
                         ),
                       ),
@@ -473,7 +474,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
                         ),
                       ),
                       selected: isSelected,
-                      selectedTileColor: cs.primary.withOpacity(0.1),
+                      selectedTileColor: cs.primary.withValues(alpha: 0.1),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -502,7 +503,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
-                tileColor: cs.error.withOpacity(0.1),
+                tileColor: cs.error.withValues(alpha: 0.1),
                 onTap: () {
                   Navigator.pop(context);
                   _showLogoutDialog();
@@ -518,7 +519,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
   Widget _buildMainContent(StoreProvider storeProvider, CustomUserProvider userProvider) {
     return ScaleTransition(
       scale: _scaleAnimation,
-      child: Container(
+      child: SizedBox(
         height: double.infinity,
         child: CustomScrollView(
           slivers: [
@@ -596,7 +597,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -642,7 +643,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -689,7 +690,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: cs.primary.withOpacity(0.3),
+            color: cs.primary.withValues(alpha: 0.3),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -724,28 +725,28 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
         storeProvider.stores.length.toString(),
         Icons.store_rounded,
         cs.primary,
-        '+12%',
+        null,
       ),
       StatCard(
         'Total Users',
         userProvider.users.length.toString(),
         Icons.people_rounded,
         ZingColors.success,
-        '+8%',
+        null,
       ),
       StatCard(
         'Active Admins',
         userProvider.users.where((user) => user.role == 'Admin').length.toString(),
         Icons.admin_panel_settings_rounded,
         cs.error,
-        '+3%',
+        null,
       ),
       StatCard(
-        'Revenue',
-        '\$24,580',
-        Icons.trending_up_rounded,
+        'Store Owners',
+        userProvider.users.where((user) => user.role == 'Owner').length.toString(),
+        Icons.storefront_rounded,
         ZingColors.warning,
-        '+15%',
+        null,
       ),
     ];
 
@@ -797,7 +798,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -812,7 +813,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: stat.color.withOpacity(0.1),
+                  color: stat.color.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
@@ -825,12 +826,12 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: ZingColors.success.withOpacity(0.1),
+                    color: ZingColors.success.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
                     stat.change!,
-                    style: TextStyle(
+                    style: const TextStyle(
                       color: ZingColors.success,
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
@@ -952,7 +953,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -972,7 +973,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: action.color.withOpacity(0.1),
+                    color: action.color.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Icon(
@@ -1117,7 +1118,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -1147,7 +1148,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
                     gradient: LinearGradient(
                       colors: [
                         _getStoreColor(store.name),
-                        _getStoreColor(store.name).withOpacity(0.7),
+                        _getStoreColor(store.name).withValues(alpha: 0.7),
                       ],
                     ),
                     borderRadius: BorderRadius.circular(16),
@@ -1185,18 +1186,16 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
                   ),
                 ),
                 if (MediaQuery.of(context).size.width > 600) ...[
-                  _buildStoreMetric('Products', '24'),
-                  const SizedBox(width: 20),
-                  _buildStoreMetric('Orders', '156'),
+                  _buildStoreMetric('Products', store.products.length.toString()),
                   const SizedBox(width: 20),
                 ],
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: ZingColors.success.withOpacity(0.1),
+                    color: ZingColors.success.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Text(
+                  child: const Text(
                     'Active',
                     style: TextStyle(
                       fontSize: 12,
@@ -1255,7 +1254,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -1321,7 +1320,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
+                  const Text(
                     '2 hours ago',
                     style: TextStyle(
                       fontSize: 14,
@@ -1403,7 +1402,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
             width: 64,
             height: 64,
             decoration: BoxDecoration(
-              color: cs.onSurfaceVariant.withOpacity(0.1),
+              color: cs.onSurfaceVariant.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(16),
             ),
             child: Icon(
@@ -1446,7 +1445,7 @@ class _EnhancedAdminPanelDashboardState extends State<EnhancedAdminPanelDashboar
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: cs.error.withOpacity(0.1),
+                color: cs.error.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(Icons.logout_rounded, color: cs.error),
@@ -1527,8 +1526,10 @@ extension StoreExtension on Store {
 
 // Usage for backward compatibility
 class AdminPanelDashboard extends StatelessWidget {
+  const AdminPanelDashboard({super.key});
+
   @override
   Widget build(BuildContext context) {
-    return EnhancedAdminPanelDashboard();
+    return const EnhancedAdminPanelDashboard();
   }
 }

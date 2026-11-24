@@ -1,12 +1,13 @@
+import 'package:zing/config/business_config.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../Modal/CoustomUser.dart';
-import '../../Service/ThemeProvider.dart';
+import 'package:zing/Modal/CoustomUser.dart';
+import 'package:zing/Service/ThemeProvider.dart';
 
 class EnhancedRenewScreen extends StatefulWidget {
   final CustomUser currentUser;
 
-  const EnhancedRenewScreen({Key? key, required this.currentUser}) : super(key: key);
+  const EnhancedRenewScreen({super.key, required this.currentUser});
 
   @override
   State<EnhancedRenewScreen> createState() => _EnhancedRenewScreenState();
@@ -137,7 +138,7 @@ class _EnhancedRenewScreenState extends State<EnhancedRenewScreen>
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: Colors.black.withValues(alpha: 0.1),
             blurRadius: 20,
             offset: const Offset(0, 10),
           ),
@@ -200,25 +201,25 @@ class _EnhancedRenewScreenState extends State<EnhancedRenewScreen>
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  cs.primary.withOpacity(0.05),
-                  cs.tertiary.withOpacity(0.05),
+                  cs.primary.withValues(alpha: 0.05),
+                  cs.tertiary.withValues(alpha: 0.05),
                 ],
               ),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: cs.primary.withOpacity(0.2),
+                color: cs.primary.withValues(alpha: 0.2),
                 width: 1,
               ),
             ),
             child: Column(
               children: [
-                _buildDetailRow('Bank Name', 'BOC BANK', Icons.account_balance),
+                _buildDetailRow('Bank Name', BusinessConfig.bankName, Icons.account_balance),
                 const SizedBox(height: 16),
-                _buildDetailRow('Account Name', 'M.Z.M SHAHIL', Icons.person),
+                _buildDetailRow('Account Name', BusinessConfig.bankAccountName, Icons.person),
                 const SizedBox(height: 16),
-                _buildDetailRow('Account Number', '93597815', Icons.credit_card),
+                _buildDetailRow('Account Number', BusinessConfig.bankAccountNumber, Icons.credit_card),
                 const SizedBox(height: 16),
-                _buildDetailRow('Branch', 'Kolonnawa branch', Icons.location_on),
+                _buildDetailRow('Branch', BusinessConfig.bankBranch, Icons.location_on),
               ],
             ),
           ),
@@ -229,21 +230,21 @@ class _EnhancedRenewScreenState extends State<EnhancedRenewScreen>
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: ZingColors.warning.withOpacity(0.1),
+              color: ZingColors.warning.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: ZingColors.warning.withOpacity(0.3),
+                color: ZingColors.warning.withValues(alpha: 0.3),
                 width: 1,
               ),
             ),
-            child: Row(
+            child: const Row(
               children: [
                 Icon(
                   Icons.info_outline,
                   color: ZingColors.warning,
                   size: 20,
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     'After payment, contact us with your receipt to activate access',
@@ -327,7 +328,7 @@ class _EnhancedRenewScreenState extends State<EnhancedRenewScreen>
             borderRadius: BorderRadius.circular(8),
             boxShadow: [
               BoxShadow(
-                color: cs.primary.withOpacity(0.1),
+                color: cs.primary.withValues(alpha: 0.1),
                 blurRadius: 4,
                 offset: const Offset(0, 2),
               ),
@@ -427,21 +428,21 @@ class _EnhancedRenewScreenState extends State<EnhancedRenewScreen>
             _buildContactOption(
               Icons.phone,
               'Call Support',
-              '+94 76 673 8871',
+              BusinessConfig.supportPhoneDisplay,
               ZingColors.success,
             ),
             const SizedBox(height: 12),
             _buildContactOption(
               Icons.email,
               'Email Support',
-              'shahil@zingmarketingmastery.com',
+              BusinessConfig.supportEmail,
               Theme.of(context).colorScheme.primary,
             ),
             const SizedBox(height: 12),
             _buildContactOption(
               Icons.chat,
               'WhatsApp',
-              '+94 76 673 8871',
+              BusinessConfig.supportWhatsAppDisplay,
               ZingColors.success,
             ),
             const SizedBox(height: 24),
@@ -464,7 +465,7 @@ class _EnhancedRenewScreenState extends State<EnhancedRenewScreen>
         leading: Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
+            color: color.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(icon, color: color, size: 20),
@@ -509,9 +510,9 @@ class _EnhancedRenewScreenState extends State<EnhancedRenewScreen>
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            cs.primary.withOpacity(0.05),
+            cs.primary.withValues(alpha: 0.05),
             cs.surface,
-            cs.tertiary.withOpacity(0.05),
+            cs.tertiary.withValues(alpha: 0.05),
           ],
         ),
       ),
@@ -550,7 +551,7 @@ class _EnhancedRenewScreenState extends State<EnhancedRenewScreen>
                                   borderRadius: BorderRadius.circular(30),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: ZingColors.warning.withOpacity(0.3),
+                                      color: ZingColors.warning.withValues(alpha: 0.3),
                                       blurRadius: 20,
                                       offset: const Offset(0, 10),
                                     ),
@@ -605,7 +606,7 @@ class _EnhancedRenewScreenState extends State<EnhancedRenewScreen>
                             borderRadius: BorderRadius.circular(20),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
+                                color: Colors.black.withValues(alpha: 0.05),
                                 blurRadius: 20,
                                 offset: const Offset(0, 10),
                               ),
@@ -618,7 +619,7 @@ class _EnhancedRenewScreenState extends State<EnhancedRenewScreen>
                             children: [
                               CircleAvatar(
                                 radius: 30,
-                                backgroundColor: cs.primary.withOpacity(0.1),
+                                backgroundColor: cs.primary.withValues(alpha: 0.1),
                                 child: Text(
                                   widget.currentUser.name.isNotEmpty
                                       ? widget.currentUser.name[0].toUpperCase()
@@ -674,7 +675,7 @@ class _EnhancedRenewScreenState extends State<EnhancedRenewScreen>
                                   borderRadius: BorderRadius.circular(16),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: cs.primary.withOpacity(0.4),
+                                      color: cs.primary.withValues(alpha: 0.4),
                                       blurRadius: 20,
                                       offset: const Offset(0, 8),
                                     ),

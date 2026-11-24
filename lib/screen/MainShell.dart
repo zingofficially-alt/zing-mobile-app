@@ -1,15 +1,17 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:zing/Cart/CartProvider.dart';
 import 'package:zing/Cart/CartScreen.dart';
-import 'package:zing/Modal/CoustomUser.dart';
 import 'package:zing/Service/CoustomUserProvider.dart';
 import 'package:zing/Service/ThemeProvider.dart';
 import 'package:zing/screen/HomeScreen.dart';
 import 'package:zing/screen/SearchExploreScreen.dart';
 import 'package:zing/screen/UserScreens/OrderHistoryPage.dart';
 import 'package:zing/screen/UserScreens/UserProfile.dart';
+import 'package:zing/Widgets/Shared/zing_ios.dart';
+import 'package:zing/Widgets/Shared/zing_motion.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -21,165 +23,247 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _selectedIndex = 0;
 
+  static const _tabs = [
+    _Tab('Home', CupertinoIcons.house, CupertinoIcons.house_fill),
+    _Tab('Explore', CupertinoIcons.compass, CupertinoIcons.compass_fill),
+    _Tab('Cart', CupertinoIcons.bag, CupertinoIcons.bag_fill),
+    _Tab('Orders', CupertinoIcons.doc_text, CupertinoIcons.doc_text_fill),
+    _Tab('Profile', CupertinoIcons.person_crop_circle, CupertinoIcons.person_crop_circle_fill),
+  ];
+
+  void _select(int index) {
+    if (index == _selectedIndex) return;
+    HapticFeedback.selectionClick();
+    setState(() => _selectedIndex = index);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    final userProvider = Provider.of<CustomUserProvider>(context);
-    final user = userProvider.user;
+    final dark = theme.brightness == Brightness.dark;
+    final user = Provider.of<CustomUserProvider>(context).user;
+
+    Widget page(int i, Widget child) => HeroMode(
+          enabled: _selectedIndex == i,
+          child: TickerMode(enabled: _selectedIndex == i, child: child),
+        );
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
-        statusBarIconBrightness:
-            theme.brightness == Brightness.dark ? Brightness.light : Brightness.dark,
-        systemNavigationBarColor: cs.surface,
-        systemNavigationBarIconBrightness:
-            theme.brightness == Brightness.dark ? Brightness.light : Brightness.dark,
+        statusBarIconBrightness: dark ? Brightness.light : Brightness.dark,
+        statusBarBrightness: dark ? Brightness.dark : Brightness.light,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarContrastEnforced: false,
+        systemNavigationBarIconBrightness: dark ? Brightness.light : Brightness.dark,
       ),
       child: Scaffold(
+        extendBody: true,
         body: IndexedStack(
           index: _selectedIndex,
           children: [
-            HeroMode(
-              enabled: _selectedIndex == 0,
-              child: const HomePageScreen(),
-            ),
-            HeroMode(
-              enabled: _selectedIndex == 1,
-              child: const SearchExploreScreen(),
-            ),
-            HeroMode(
-              enabled: _selectedIndex == 2,
-              child: user != null
+            page(0, const HomePageScreen()),
+            page(1, const SearchExploreScreen()),
+            page(
+              2,
+              user != null
                   ? CartScreen(userId: user.id, showAppBar: false)
-                  : _buildLoginRequired('Cart'),
+                  : const _SignInPrompt(
+                      title: 'Your Bag',
+                      icon: CupertinoIcons.bag,
+                      message: 'Sign in to save items to your bag and check out from any store.',
+                    ),
             ),
-            HeroMode(
-              enabled: _selectedIndex == 3,
-              child: user != null
-                  ? OrderHistoryPage()
-                  : _buildLoginRequired('Orders'),
+            page(
+              3,
+              user != null
+                  ? const OrderHistoryPage()
+                  : const _SignInPrompt(
+                      title: 'Orders',
+                      icon: CupertinoIcons.doc_text,
+                      message: 'Sign in to track deliveries and see everything you have ordered.',
+                    ),
             ),
-            HeroMode(
-              enabled: _selectedIndex == 4,
-              child: user != null
-                  ? UserProfilePage()
-                  : _buildLoginRequired('Profile'),
+            page(
+              4,
+              user != null
+                  ? const UserProfilePage()
+                  : const _SignInPrompt(
+                      title: 'Profile',
+                      icon: CupertinoIcons.person_crop_circle,
+                      message: 'Sign in to manage your profile, favourites and settings.',
+                    ),
             ),
           ],
         ),
-        bottomNavigationBar: Container(
-          decoration: BoxDecoration(
-            color: cs.surface,
-            boxShadow: [
-              BoxShadow(
-                color: cs.shadow.withOpacity(0.08),
-                blurRadius: 20,
-                offset: const Offset(0, -2),
+        bottomNavigationBar: _GlassTabBar(
+          tabs: _tabs,
+          selectedIndex: _selectedIndex,
+          onSelect: _select,
+        ),
+      ),
+    );
+  }
+}
+
+class _Tab {
+  final String label;
+  final IconData icon;
+  final IconData selectedIcon;
+  const _Tab(this.label, this.icon, this.selectedIcon);
+}
+
+/// Frosted tab bar with a hairline top border, like UITabBar.
+class _GlassTabBar extends StatelessWidget {
+  final List<_Tab> tabs;
+  final int selectedIndex;
+  final ValueChanged<int> onSelect;
+
+  const _GlassTabBar({required this.tabs, required this.selectedIndex, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+
+    return ZingGlass(
+      opacity: 0.72,
+      blur: 30,
+      color: Theme.of(context).brightness == Brightness.dark
+          ? const Color(0xFF161618)
+          : const Color(0xFFF9F9F9),
+      border: Border(top: BorderSide(color: cs.outline.withValues(alpha: 0.55), width: 0.5)),
+      child: Padding(
+        padding: EdgeInsets.only(bottom: bottomInset > 0 ? bottomInset : 8, top: 6),
+        child: Row(
+          children: [
+            for (var i = 0; i < tabs.length; i++)
+              Expanded(
+                child: _TabItem(
+                  tab: tabs[i],
+                  selected: i == selectedIndex,
+                  onTap: () => onSelect(i),
+                  badge: i == 2
+                      ? Consumer<CartProvider>(
+                          builder: (_, cart, __) => ZingBadge(count: cart.items.length),
+                        )
+                      : null,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TabItem extends StatelessWidget {
+  final _Tab tab;
+  final bool selected;
+  final VoidCallback onTap;
+  final Widget? badge;
+
+  const _TabItem({required this.tab, required this.selected, required this.onTap, this.badge});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final color = selected ? cs.primary : cs.onSurfaceVariant.withValues(alpha: 0.75);
+
+    return Semantics(
+      selected: selected,
+      button: true,
+      label: tab.label,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: SizedBox(
+          height: 50,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // The icon pops when it becomes selected.
+              TweenAnimationBuilder<double>(
+                key: ValueKey(selected),
+                tween: Tween(begin: selected ? 0.82 : 1, end: 1),
+                duration: const Duration(milliseconds: 420),
+                curve: Curves.elasticOut,
+                builder: (_, scale, child) => Transform.scale(scale: scale, child: child),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Icon(selected ? tab.selectedIcon : tab.icon, size: 25, color: color),
+                    if (badge != null) Positioned(right: -10, top: -5, child: badge!),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 3),
+              AnimatedDefaultTextStyle(
+                duration: ZingMotion.fast,
+                style: ZingType.style(10, weight: FontWeight.w500, color: color),
+                child: Text(tab.label),
               ),
             ],
-          ),
-          child: SafeArea(
-            child: NavigationBar(
-              height: 72,
-              selectedIndex: _selectedIndex,
-              onDestinationSelected: (index) {
-                HapticFeedback.lightImpact();
-                setState(() => _selectedIndex = index);
-              },
-              backgroundColor: Colors.transparent,
-              surfaceTintColor: Colors.transparent,
-              elevation: 0,
-              indicatorColor: cs.primary.withOpacity(0.12),
-              labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-              destinations: [
-                const NavigationDestination(
-                  icon: Icon(Icons.home_outlined),
-                  selectedIcon: Icon(Icons.home_rounded),
-                  label: 'Home',
-                ),
-                const NavigationDestination(
-                  icon: Icon(Icons.explore_outlined),
-                  selectedIcon: Icon(Icons.explore_rounded),
-                  label: 'Explore',
-                ),
-                NavigationDestination(
-                  icon: Consumer<CartProvider>(
-                    builder: (context, cart, child) {
-                      return Badge(
-                        isLabelVisible: cart.items.isNotEmpty,
-                        label: Text('${cart.items.length}'),
-                        backgroundColor: cs.secondary,
-                        child: const Icon(Icons.shopping_cart_outlined),
-                      );
-                    },
-                  ),
-                  selectedIcon: Consumer<CartProvider>(
-                    builder: (context, cart, child) {
-                      return Badge(
-                        isLabelVisible: cart.items.isNotEmpty,
-                        label: Text('${cart.items.length}'),
-                        backgroundColor: cs.secondary,
-                        child: const Icon(Icons.shopping_cart_rounded),
-                      );
-                    },
-                  ),
-                  label: 'Cart',
-                ),
-                const NavigationDestination(
-                  icon: Icon(Icons.receipt_long_outlined),
-                  selectedIcon: Icon(Icons.receipt_long_rounded),
-                  label: 'Orders',
-                ),
-                const NavigationDestination(
-                  icon: Icon(Icons.person_outline_rounded),
-                  selectedIcon: Icon(Icons.person_rounded),
-                  label: 'Profile',
-                ),
-              ],
-            ),
           ),
         ),
       ),
     );
   }
+}
 
-  Widget _buildLoginRequired(String feature) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
+/// Shown on tabs that need an account when nobody is signed in.
+class _SignInPrompt extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  final String message;
 
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.login_rounded,
-              size: 80,
-              color: cs.primary.withOpacity(0.5),
+  const _SignInPrompt({required this.title, required this.icon, required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return ZingLargeTitlePage(
+      title: title,
+      slivers: [
+        SliverFillRemaining(
+          hasScrollBody: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(32, 0, 32, 120),
+            child: ZingReveal(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 96,
+                    height: 96,
+                    decoration: BoxDecoration(
+                      color: cs.primary.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(icon, size: 44, color: cs.primary),
+                  ),
+                  const SizedBox(height: 22),
+                  Text('Sign in to continue',
+                      style: ZingType.title2(cs.onSurface), textAlign: TextAlign.center),
+                  const SizedBox(height: 8),
+                  Text(message,
+                      style: ZingType.subhead(cs.onSurfaceVariant), textAlign: TextAlign.center),
+                  const SizedBox(height: 28),
+                  ZingButton(
+                    label: 'Sign In',
+                    onPressed: () => Navigator.pushNamed(context, '/login'),
+                  ),
+                  const SizedBox(height: 10),
+                  CupertinoButton(
+                    onPressed: () => Navigator.pushNamed(context, '/createAccount'),
+                    child: Text('Create an account', style: ZingType.body(cs.primary)),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: ZingSpacing.lg),
-            Text(
-              'Login Required',
-              style: theme.textTheme.headlineMedium,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Please log in to access $feature',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium,
-            ),
-            const SizedBox(height: ZingSpacing.xl),
-            ElevatedButton.icon(
-              onPressed: () => Navigator.pushNamed(context, '/login'),
-              icon: const Icon(Icons.login),
-              label: const Text('Login'),
-            ),
-          ],
+          ),
         ),
-      ),
+      ],
     );
   }
 }

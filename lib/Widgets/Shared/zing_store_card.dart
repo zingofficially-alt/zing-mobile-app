@@ -1,3 +1,5 @@
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -6,207 +8,135 @@ import 'package:zing/Service/CoustomUserProvider.dart';
 import 'package:zing/Service/RecommendationProvider.dart';
 import 'package:zing/Service/ThemeProvider.dart';
 import 'package:zing/screen/StoreScreen/StoreScreen.dart';
+import 'package:zing/Widgets/Shared/zing_motion.dart';
 
+/// Opens a store page with the iOS push and logs the view for recommendations.
+void openStore(BuildContext context, Store store, {CustomUser? user, String? attributionToken}) {
+  Provider.of<RecommendationProvider>(context, listen: false).logEvent(
+    eventType: 'detail-page-view',
+    productIds: ['store_${store.id}'],
+    attributionToken: attributionToken,
+  );
+  Navigator.of(context).push(zingRoute(StoreDetailScreen(store: store, user: user)));
+}
+
+/// Store card in two layouts:
+/// * compact (default) — a 200pt-wide card for horizontal rows;
+/// * [wide] — a full-width hero card with a parallax photo, for vertical lists.
 class ZingStoreCard extends StatelessWidget {
   final Store store;
   final CustomUser? user;
   final double? distance;
   final double rating;
+  final bool wide;
+
+  /// Recommendation attribution, logged when the card is opened.
+  final String? attributionToken;
 
   const ZingStoreCard({
+    this.attributionToken,
     super.key,
     required this.store,
     this.user,
     this.distance,
     this.rating = 0.0,
+    this.wide = false,
   });
+
+  String get _distanceLabel {
+    final d = distance;
+    if (d == null) return store.category;
+    if (d < 1) return '${(d * 1000).round()} m';
+    return '${d.toStringAsFixed(1)} km';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
+    return wide ? _buildWide(context) : _buildCompact(context);
+  }
 
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.mediumImpact();
-        Provider.of<RecommendationProvider>(context, listen: false).logEvent(
-          eventType: 'detail-page-view',
-          productIds: ['store_${store.id}'],
-        );
-        Navigator.push(
-          context,
-          PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) =>
-                StoreDetailScreen(store: store, user: user),
-            transitionsBuilder: (context, animation, secondaryAnimation, child) {
-              return FadeTransition(
-                opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
-                child: SlideTransition(
-                  position: Tween<Offset>(
-                    begin: const Offset(0.0, 0.04),
-                    end: Offset.zero,
-                  ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
-                  child: child,
-                ),
-              );
-            },
-            transitionDuration: const Duration(milliseconds: 300),
-          ),
-        );
-      },
+  Widget _image(ColorScheme cs) {
+    if (store.imageUrl.isEmpty) return _placeholder(cs);
+    return CachedNetworkImage(
+      imageUrl: store.imageUrl,
+      fit: BoxFit.cover,
+      fadeInDuration: ZingMotion.medium,
+      placeholder: (_, __) => ColoredBox(color: cs.surfaceContainerHighest),
+      errorWidget: (_, __, ___) => _placeholder(cs),
+    );
+  }
+
+  Widget _placeholder(ColorScheme cs) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [cs.primary.withValues(alpha: 0.18), cs.secondary.withValues(alpha: 0.14)],
+        ),
+      ),
+      child: Icon(CupertinoIcons.bag, color: cs.primary.withValues(alpha: 0.45), size: 40),
+    );
+  }
+
+  Widget _buildCompact(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final status = store.openStatus();
+
+    return ZingPressable(
+      onTap: () => openStore(context, store, user: user, attributionToken: attributionToken),
       child: Container(
-        width: 188,
-        margin: const EdgeInsets.symmetric(horizontal: ZingSpacing.sm, vertical: 10),
+        width: 210,
+        margin: const EdgeInsets.fromLTRB(6, 4, 6, 14),
         decoration: BoxDecoration(
           color: cs.surface,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(ZingRadius.lg),
           boxShadow: ZingShadows.card,
         ),
         clipBehavior: Clip.antiAlias,
-        child: Stack(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Store image
-                SizedBox(
-                  height: 130,
-                  width: double.infinity,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      store.imageUrl.isNotEmpty
-                          ? Image.network(
-                              store.imageUrl,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => _buildPlaceholder(cs),
-                            )
-                          : _buildPlaceholder(cs),
-                      // Gradient overlay
-                      Positioned.fill(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [Colors.transparent, Colors.black.withOpacity(0.15)],
-                              stops: const [0.5, 1.0],
-                            ),
-                          ),
-                        ),
-                      ),
-                      // Rating badge
-                      Positioned(
-                        top: 10,
-                        left: 10,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: cs.surface,
-                            borderRadius: BorderRadius.circular(20),
-                            boxShadow: ZingShadows.soft,
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.star_rounded, color: ZingColors.warning, size: 14),
-                              const SizedBox(width: 3),
-                              Text(
-                                rating.toStringAsFixed(1),
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                  color: cs.onSurface,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
+            Expanded(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _image(cs),
+                  Positioned(top: 10, right: 10, child: _FavouriteButton(storeId: store.id)),
+                  if (rating > 0)
+                    Positioned(left: 10, bottom: 10, child: _RatingChip(rating: rating)),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    store.name,
+                    style: ZingType.headline(cs.onSurface),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-                // Store info
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  const SizedBox(height: 4),
+                  Row(
                     children: [
-                      Text(
-                        store.name,
-                        style: theme.textTheme.titleMedium?.copyWith(height: 1.2),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 5),
-                      Row(
-                        children: [
-                          Icon(Icons.place_rounded, color: cs.onSurfaceVariant, size: 13),
-                          const SizedBox(width: 3),
-                          Expanded(
-                            child: Text(
-                              distance != null
-                                  ? '${distance!.toStringAsFixed(1)} km away'
-                                  : 'Distance N/A',
-                              style: theme.textTheme.bodySmall,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: cs.primary.withOpacity(0.09),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
+                      if (status != null) ...[
+                        _OpenDot(open: status.isOpen),
+                        const SizedBox(width: 5),
+                      ],
+                      Expanded(
                         child: Text(
-                          store.category,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: cs.primary,
-                          ),
+                          distance == null ? store.category : '${store.category} · $_distanceLabel',
+                          style: ZingType.footnote(cs.onSurfaceVariant),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
                   ),
-                ),
-              ],
-            ),
-            // Favourite button
-            Positioned(
-              top: 10,
-              right: 10,
-              child: Consumer<CustomUserProvider>(
-                builder: (context, userProvider, _) {
-                  final isFavorite = userProvider.isFavoriteStore(store.id!);
-                  return GestureDetector(
-                    onTap: () {
-                      HapticFeedback.lightImpact();
-                      if (isFavorite) {
-                        userProvider.removeFavoriteStore(store.id!);
-                      } else {
-                        userProvider.addFavoriteStore(store.id!);
-                      }
-                    },
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      padding: const EdgeInsets.all(7),
-                      decoration: BoxDecoration(
-                        color: isFavorite ? cs.secondary : cs.surface,
-                        shape: BoxShape.circle,
-                        boxShadow: ZingShadows.soft,
-                      ),
-                      child: Icon(
-                        isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                        color: isFavorite ? Colors.white : cs.onSurfaceVariant,
-                        size: 16,
-                      ),
-                    ),
-                  );
-                },
+                ],
               ),
             ),
           ],
@@ -215,10 +145,204 @@ class ZingStoreCard extends StatelessWidget {
     );
   }
 
-  Widget _buildPlaceholder(ColorScheme cs) {
+  Widget _buildWide(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final status = store.openStatus();
+
+    return ZingPressable(
+      pressedScale: 0.97,
+      onTap: () => openStore(context, store, user: user, attributionToken: attributionToken),
+      child: Container(
+        height: 236,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(ZingRadius.xl - 4),
+          boxShadow: ZingShadows.card,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ZingParallax(child: _image(cs)),
+            // Legibility scrim for the caption.
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0x00000000), Color(0x14000000), Color(0xB3000000)],
+                  stops: [0.35, 0.55, 1],
+                ),
+              ),
+            ),
+            Positioned(top: 14, right: 14, child: _FavouriteButton(storeId: store.id)),
+            Positioned(
+              top: 14,
+              left: 14,
+              child: ZingGlass(
+                borderRadius: BorderRadius.circular(100),
+                color: Colors.black,
+                opacity: 0.28,
+                blur: 14,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  child: Text(
+                    store.category.toUpperCase(),
+                    style: ZingType.style(11, weight: FontWeight.w700, color: Colors.white, letterSpacing: 0.6),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 18,
+              right: 18,
+              bottom: 16,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          store.name,
+                          style: ZingType.title2(Colors.white),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            if (status != null) ...[
+                              _OpenDot(open: status.isOpen),
+                              const SizedBox(width: 6),
+                              Text(status.isOpen ? 'Open' : 'Closed',
+                                  style: ZingType.subhead(Colors.white.withValues(alpha: 0.92))),
+                              Text('  ·  ', style: ZingType.subhead(Colors.white70)),
+                            ],
+                            Flexible(
+                              child: Text(
+                                distance != null ? _distanceLabel : store.description,
+                                style: ZingType.subhead(Colors.white.withValues(alpha: 0.92)),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (rating > 0) ...[
+                    const SizedBox(width: 12),
+                    _RatingChip(rating: rating, large: true),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OpenDot extends StatelessWidget {
+  final bool open;
+  const _OpenDot({required this.open});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = open ? ZingColors.success : ZingColors.error;
     return Container(
-      color: cs.primary.withOpacity(0.08),
-      child: Icon(Icons.storefront_rounded, color: cs.primary.withOpacity(0.3), size: 40),
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        boxShadow: [BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 4)],
+      ),
+    );
+  }
+}
+
+class _RatingChip extends StatelessWidget {
+  final double rating;
+  final bool large;
+  const _RatingChip({required this.rating, this.large = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return ZingGlass(
+      borderRadius: BorderRadius.circular(100),
+      color: Colors.white,
+      opacity: 0.88,
+      blur: 12,
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: large ? 10 : 8, vertical: large ? 6 : 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(CupertinoIcons.star_fill, color: ZingColors.warning, size: large ? 15 : 12),
+            const SizedBox(width: 4),
+            Text(
+              rating.toStringAsFixed(1),
+              style: ZingType.style(large ? 14 : 12, weight: FontWeight.w700, color: ZingColors.textDark),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Heart toggle on a frosted circle. Bounces when switched on.
+class _FavouriteButton extends StatelessWidget {
+  final String? storeId;
+  const _FavouriteButton({required this.storeId});
+
+  @override
+  Widget build(BuildContext context) {
+    final id = storeId;
+    if (id == null) return const SizedBox.shrink();
+    return Consumer<CustomUserProvider>(
+      builder: (context, userProvider, _) {
+        if (userProvider.user == null) return const SizedBox.shrink();
+        final isFavorite = userProvider.isFavoriteStore(id);
+        return GestureDetector(
+          onTap: () {
+            HapticFeedback.mediumImpact();
+            if (isFavorite) {
+              userProvider.removeFavoriteStore(id);
+            } else {
+              userProvider.addFavoriteStore(id);
+            }
+          },
+          child: ZingGlass(
+            borderRadius: BorderRadius.circular(100),
+            color: Colors.white,
+            opacity: 0.86,
+            blur: 12,
+            child: SizedBox(
+              width: 34,
+              height: 34,
+              child: TweenAnimationBuilder<double>(
+                key: ValueKey(isFavorite),
+                tween: Tween(begin: isFavorite ? 0.5 : 1, end: 1),
+                duration: const Duration(milliseconds: 500),
+                curve: Curves.elasticOut,
+                builder: (_, s, child) => Transform.scale(scale: s, child: child),
+                child: Icon(
+                  isFavorite ? CupertinoIcons.heart_fill : CupertinoIcons.heart,
+                  color: isFavorite ? ZingColors.secondary : ZingColors.textDark,
+                  size: 18,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
