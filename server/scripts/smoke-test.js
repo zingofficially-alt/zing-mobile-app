@@ -85,15 +85,26 @@ const must = (label, {data, error}) => {
     const cart = must('cart read', await app.from('cart_items').select().eq('user_id', userId));
     check('cart row saved', cart.length === 1 && cart[0].quantity === 2);
 
-    // 9. order with items, as the app writes it
-    const order = must('order', await app.from('orders').insert({
-      user_id: userId, store_id: store.id, delivery_method: 'Store Pickup', status: 'Pending', total_price: 19}).select('id').single());
-    must('order item', await app.from('order_items').insert({
-      order_id: order.id, product_id: product.id, name: 'Smoke Item', price: 9.5, quantity: 2}));
+    // 9. order through place_order (a second user buys; owners cannot order from themselves)
+    const buyerEmail = `smoke-buyer+${Date.now()}@zing-test.dev`;
+    const buyer = must('buyer', await admin.auth.admin.createUser({email: buyerEmail, password, email_confirm: true}));
+    const buyerApp = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {auth: {persistSession: false}});
+    must('buyer signIn', await buyerApp.auth.signInWithPassword({email: buyerEmail, password}));
+    const orderId = must('place_order', await buyerApp.rpc('place_order', {
+      p_store_id: store.id, p_items: [{product_id: product.id, quantity: 2}],
+      p_delivery_method: 'Store Pickup', p_delivery_address: null}));
     const orders = must('orders', await app.from('orders').select(
       '*, order_items(*), buyer:profiles!user_id(id, name, email, phone_number, address, profile_image_url, role)')
       .eq('store_id', store.id));
-    check('order loads with items and buyer', orders.length === 1 && orders[0].order_items.length === 1 && orders[0].buyer.id === userId);
+    check('order loads with items and buyer', orders.length === 1 && orders[0].order_items.length === 1 && orders[0].buyer.id === buyer.user.id);
+    check('order priced server-side', Number(orders[0].total_price) === 19);
+    const stock = must('stock', await admin.from('products').select('quantity').eq('id', product.id).single());
+    check('stock reserved', stock.quantity === 1);
+    const direct = await buyerApp.from('orders').insert({user_id: buyer.user.id, store_id: store.id, total_price: 1});
+    check('direct order insert is blocked', Boolean(direct.error));
+    const own = await app.rpc('place_order', {p_store_id: store.id, p_items: [{product_id: product.id, quantity: 1}], p_delivery_method: 'Store Pickup'});
+    check('owner cannot order from own store', Boolean(own.error));
+    await admin.auth.admin.deleteUser(buyer.user.id);
 
     // 10. chat: create, message, trigger updates the summary
     const chat = must('chat', await app.from('chats').insert({user_id: userId, store_id: store.id}).select('id').single());
@@ -108,7 +119,7 @@ const must = (label, {data, error}) => {
     // 12. notifications are admin-created, user-readable
     must('notify', await admin.from('notifications').insert({user_id: userId, title: 'Hi', body: 'There'}));
     const notes = must('notes', await app.from('notifications').select().eq('user_id', userId));
-    check('user reads own notifications', notes.length === 1);
+    check('user reads own notifications', notes.length >= 1 && notes.some(n => n.title === 'Hi'));
 
     // 13. recommendations function exists and is not callable by clients
     const rec = await app.rpc('recommend_products', {uid: userId, lim: 5});
