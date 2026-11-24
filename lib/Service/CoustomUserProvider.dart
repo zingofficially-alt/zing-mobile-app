@@ -47,6 +47,22 @@ class CustomUserProvider with ChangeNotifier {
           'payment_status': 'Completed',
           'paid_at': DateTime.now().toUtc().toIso8601String(),
         }).eq('id', latest.first['id']);
+      } else if (accessStatus) {
+        // Nothing was recorded yet. Store access ends 30 days after the latest
+        // payment (expire_store_access), so approving must leave a payment.
+        final store = await _db
+            .from('stores')
+            .select('id, registration_amount')
+            .eq('owner_id', user.id)
+            .limit(1)
+            .maybeSingle();
+        await _db.from('payments').insert({
+          'user_id': user.id,
+          'store_id': store?['id'],
+          'amount': store?['registration_amount'] ?? 0,
+          'items': 'Store subscription (approved by admin)',
+          'payment_status': 'Completed',
+        });
       }
 
       await _db
@@ -105,7 +121,6 @@ class CustomUserProvider with ChangeNotifier {
     fetchUserDetails();
   }
 
-  Future<void> fetchUserDataFromFirestore() => fetchUserDetails();
 
   Future<List<String>> _favoritesOf(String userId) async {
     final rows = await _db.from('user_favorites').select('store_id').eq('user_id', userId);

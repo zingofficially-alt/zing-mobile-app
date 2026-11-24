@@ -10,6 +10,34 @@ const String kStoreSelect =
     '*, products(*), store_videos(*), store_ratings(user_id, rating), '
     'owner:profiles!owner_id(id, name, email, phone_number, profile_image_url)';
 
+/// People can read only their own profile and those of people they trade or
+/// chat with, so the `owner` embed of [kStoreSelect] comes back empty for most
+/// customers. This fills in the public part (name, photo) through
+/// `store_owner_info`, for the store rows that have no owner yet.
+Future<void> fillStoreOwners(List rows) async {
+  final missing = <String>[
+    for (final r in rows)
+      if (r['owner'] == null && r['id'] is String) r['id'] as String,
+  ];
+  if (missing.isEmpty) return;
+  try {
+    final owners = await _db.rpc('store_owner_info', params: {'p_store_ids': missing});
+    final byStore = {for (final o in owners as List) o['store_id'] as String: o};
+    for (final r in rows) {
+      final o = byStore[r['id']];
+      if (o != null) {
+        r['owner'] = {
+          'id': o['id'],
+          'name': o['name'],
+          'profile_image_url': o['profile_image_url'],
+        };
+      }
+    }
+  } catch (e) {
+    print('Error loading store owners: $e');
+  }
+}
+
 // Helper to sanitize image URLs - removes placeholder URLs
 String _sanitizeImageUrl(String? url) {
   if (url == null || url.isEmpty) return '';

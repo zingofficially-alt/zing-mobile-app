@@ -57,8 +57,9 @@ class StoreProvider with ChangeNotifier {
 
     try {
       final rows = await _db.from('stores').select(kStoreSelect).order('created_at');
+      await fillStoreOwners(rows as List);
       final fetched = <Store>[];
-      for (final row in rows as List) {
+      for (final row in rows) {
         try {
           fetched.add(Store.fromRow(row));
         } catch (e) {
@@ -87,7 +88,9 @@ class StoreProvider with ChangeNotifier {
     try {
       final row =
           await _db.from('stores').select(kStoreSelect).eq('id', storeId).maybeSingle();
-      return row == null ? null : Store.fromRow(row);
+      if (row == null) return null;
+      await fillStoreOwners([row]);
+      return Store.fromRow(row);
     } catch (e) {
       print('Error fetching store for storeId $storeId: $e');
       throw Exception('Failed to fetch store data.');
