@@ -151,7 +151,7 @@ class _AddEditStoreDialogState extends State<AddEditStoreDialog> {
     );
   }
 
-  Future<String> _uploadImageToFirebase(File imageFile) async {
+  Future<String> _uploadStoreImage(File imageFile) async {
     try {
       String fileName = 'store_images/${DateTime.now().millisecondsSinceEpoch}.jpg';
       return await StorageService.uploadFile(Buckets.store, fileName, imageFile);
@@ -313,7 +313,7 @@ class _AddEditStoreDialogState extends State<AddEditStoreDialog> {
         String imageUrl;
 
         if (_pickedImage != null) {
-          imageUrl = await _uploadImageToFirebase(_pickedImage!);
+          imageUrl = await _uploadStoreImage(_pickedImage!);
         } else if (isEditMode && widget.store!.imageUrl.isNotEmpty) {
           imageUrl = widget.store!.imageUrl;
         } else {

@@ -53,9 +53,6 @@ target 'Runner' do
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
 
-  # Add reCAPTCHA Enterprise for Firebase Phone Authentication
-  pod 'RecaptchaEnterprise'
-
   target 'RunnerTests' do
     inherit! :search_paths
   end

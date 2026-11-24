@@ -126,7 +126,7 @@ class Zing extends StatelessWidget {
         '/auth': (_) => AuthWrapper(),
         '/splash': (_) => const SplashScreen(),
         '/onboarding': (_) => OnboardingScreen(),
-        '/login': (_) => FirebaseLoginScreen(),
+        '/login': (_) => LoginScreen(),
         '/createAccount': (_) => CreateAccountScreen(),
         '/home': (_) => const MainShell(),
         '/storeManagement': (_) => const StoreManagementWidget(),

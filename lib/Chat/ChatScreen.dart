@@ -635,7 +635,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         final chatProvider =
                         Provider.of<ChatProvider>(context, listen: false);
 
-                        // We do NOT translate here. We store the original text in Firestore
+                        // We do NOT translate here. We store the original text in the database
                         // The bubble will translate it dynamically.
 
                         if (_effectiveChatId == null) {

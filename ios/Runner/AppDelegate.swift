@@ -1,7 +1,6 @@
 import Flutter
 import UIKit
 import GoogleMaps
-import Firebase
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
@@ -9,9 +8,6 @@ import Firebase
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    // Initialize Firebase
-    FirebaseApp.configure()
-
     // Configure Google Maps
     // Key comes from .env -> Flutter/Secrets.xcconfig -> Info.plist (GMSApiKey).
     if let mapsKey = Bundle.main.object(forInfoDictionaryKey: "GMSApiKey") as? String,

@@ -27,8 +27,7 @@ project root.
 4. iOS: run `pod install` in `ios/` after editing `.env`; it generates the
    git-ignored `ios/Flutter/Secrets.xcconfig` used by `Info.plist`.
 
-Never commit `.env`. `google-services.json` and `GoogleService-Info.plist` are
-Firebase client config files and stay in the repo.
+Never commit `.env`.
 
 ## Database migrations
 

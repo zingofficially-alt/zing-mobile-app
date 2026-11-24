@@ -158,14 +158,13 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> with SingleTicker
       _isFavorite = !_isFavorite;
     });
 
-    // Update the user's favorites in Firestore
+    // Update the user's favorites
     if (_isFavorite) {
       widget.user!.addFavorite(widget.store.id!);
     } else {
       widget.user!.removeFavorite(widget.store.id!);
     }
 
-    // Save to Firestore (this would need to be implemented via a service)
     final favorites = Supabase.instance.client.from('user_favorites');
     (_isFavorite
             ? favorites.upsert({'user_id': widget.user!.id, 'store_id': widget.store.id})
@@ -405,9 +404,9 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> with SingleTicker
   // --------------------------------------------------------------------------
   // Ratings
   Future<void> _checkIfUserHasRated() async {
-    final firebaseUser = Supabase.instance.client.auth.currentUser;
-    if (firebaseUser != null) {
-      bool hasRated = await widget.store.userHasRated(firebaseUser.id);
+    final authUser = Supabase.instance.client.auth.currentUser;
+    if (authUser != null) {
+      bool hasRated = await widget.store.userHasRated(authUser.id);
       setState(() {
         _hasRated = hasRated;
       });
@@ -431,9 +430,9 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> with SingleTicker
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
 
-    final firebaseUser = Supabase.instance.client.auth.currentUser;
-    if (firebaseUser != null) {
-      await widget.store.submitRating(firebaseUser.id, _currentRating);
+    final authUser = Supabase.instance.client.auth.currentUser;
+    if (authUser != null) {
+      await widget.store.submitRating(authUser.id, _currentRating);
       setState(() {
         _hasRated = true;
       });

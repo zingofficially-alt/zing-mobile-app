@@ -52,10 +52,6 @@ class _ManageUsersPageState extends State<ManageUsersPage> with TickerProviderSt
 
     _animationController.forward();
 
-    // Debug Firestore data after a short delay
-    Future.delayed(Duration(seconds: 2), () {
-      _debugUserData();
-    });
   }
 
   void _handleTabChange() {

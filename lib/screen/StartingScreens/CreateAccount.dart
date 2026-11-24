@@ -77,7 +77,6 @@ class _CreateAccountScreenState extends State<CreateAccountScreen>
   @override
   void initState() {
     super.initState();
-    _checkFirebaseConfig();
     _checkDarkMode();
     _initializeAnimations();
     _setupKeyboardListener();
@@ -557,7 +556,7 @@ class _CreateAccountScreenState extends State<CreateAccountScreen>
         break;
     }
   }
-  // Firebase methods
+  // Phone verification
   Future<void> _sendPhoneVerification() async {
     if (_otpRetryCount >= _maxOtpRetries) {
       setState(() {
@@ -608,9 +607,6 @@ class _CreateAccountScreenState extends State<CreateAccountScreen>
       }
       HapticFeedback.heavyImpact();
     }
-  }
-  Future<void> _checkFirebaseConfig() async {
-    // Nothing to check: Supabase is initialised in main().
   }
   Future<void> _verifyOTP() async {
     final otp = otpControllers.map((c) => c.text).join();

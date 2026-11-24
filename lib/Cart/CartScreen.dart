@@ -35,7 +35,7 @@ class _CartScreenState extends State<CartScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final cartProvider = Provider.of<CartProvider>(context, listen: false);
       cartProvider.setUserId(widget.userId);
-      await cartProvider.loadCartFromFirestore(context);
+      await cartProvider.loadCart(context);
 
       // Fetch cart recommendations after cart items are loaded
       if (!mounted) return;

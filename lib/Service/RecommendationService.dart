@@ -1,7 +1,7 @@
 import 'package:zing/Service/ApiClient.dart';
 
 /// Talks to the Node API (`/events`, `/recommendations`), which replaced the
-/// Firebase Cloud Functions that used Google Cloud Retail.
+/// old Google Cloud Retail recommendations.
 class RecommendationService {
   /// Extracts the product uuid from a catalog id such as `product_<store>_<id>`.
   static String? _productId(String raw) {

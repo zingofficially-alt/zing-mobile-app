@@ -32,19 +32,6 @@
   <title>zing</title>
   <link rel="manifest" href="manifest.json">
 
-  <!-- Firebase Configuration -->
-  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
-  <script>
-    // This prevents the redirect state error by ensuring sessionStorage is accessible
-    if (typeof(Storage) !== "undefined") {
-      // Configure Firebase Auth to use local persistence instead of session
-      // This avoids the "missing initial state" error
-      console.log("Browser storage is available");
-    } else {
-      console.warn("Browser storage is not available - some features may not work");
-    }
-  </script>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>

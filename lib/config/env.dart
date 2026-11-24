@@ -7,7 +7,6 @@ class Env {
   Env._();
 
   static const googleMapsApiKey = String.fromEnvironment('GOOGLE_MAPS_API_KEY');
-  static const googleTranslateApiKey = String.fromEnvironment('GOOGLE_TRANSLATE_API_KEY');
   static const googleDirectionsApiKey = String.fromEnvironment('GOOGLE_DIRECTIONS_API_KEY');
 
   /// Supabase project URL and publishable (anon) key. Safe to ship in the app:

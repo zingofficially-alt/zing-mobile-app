@@ -84,7 +84,7 @@ class CartProvider with ChangeNotifier {
     _userId = userId;
   }
 
-  Future<void> loadCartFromFirestore(BuildContext context) async {
+  Future<void> loadCart(BuildContext context) async {
     if (_userId.isEmpty) return;
 
     try {

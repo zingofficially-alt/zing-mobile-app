@@ -1,4 +1,4 @@
-/// Small value types that replaced the Firestore `Timestamp` and `GeoPoint`
+/// Small value types that replaced the Cloud Firestore `Timestamp` and `GeoPoint`
 /// classes, so models and screens kept their shape during the Supabase migration.
 
 class Timestamp implements Comparable<Timestamp> {

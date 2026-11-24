@@ -46,14 +46,14 @@ String authErrorMessage(AuthException e) {
   return e.message.isEmpty ? 'Something went wrong. Please try again.' : e.message;
 }
 
-class FirebaseLoginScreen extends StatefulWidget {
-  const FirebaseLoginScreen({Key? key}) : super(key: key);
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({Key? key}) : super(key: key);
 
   @override
-  _FirebaseLoginScreenState createState() => _FirebaseLoginScreenState();
+  _LoginScreenState createState() => _LoginScreenState();
 }
 
-class _FirebaseLoginScreenState extends State<FirebaseLoginScreen>
+class _LoginScreenState extends State<LoginScreen>
     with SingleTickerProviderStateMixin {
   bool isPhoneSelected = false;
   bool isTermsAccepted = false;
@@ -396,7 +396,7 @@ class _FirebaseLoginScreenState extends State<FirebaseLoginScreen>
       _errorMessage = null;
     });
 
-    print("🔵 Starting Firebase phone verification...");
+    print("🔵 Starting phone verification...");
     try {
       await _auth.signInWithOtp(phone: phoneNumber);
       if (mounted) {
