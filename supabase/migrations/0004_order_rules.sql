@@ -33,6 +33,7 @@ create index if not exists order_status_history_order_idx
   on public.order_status_history(order_id, changed_at);
 
 alter table public.order_status_history enable row level security;
+drop policy if exists order_history_read on public.order_status_history;
 create policy order_history_read on public.order_status_history for select to authenticated using (
   exists (select 1 from public.orders o where o.id = order_id
           and (o.user_id = auth.uid() or public.is_store_owner(o.store_id) or public.is_admin())));
@@ -279,4 +280,7 @@ create trigger order_before_delete before delete on public.orders
   for each row execute function public.order_before_delete();
 
 -- The order list reads live status changes.
-alter publication supabase_realtime add table public.orders;
+do $$ begin
+  alter publication supabase_realtime add table public.orders;
+exception when duplicate_object then null;
+end $$;

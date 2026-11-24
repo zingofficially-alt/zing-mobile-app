@@ -58,19 +58,23 @@ end $$;
 drop policy if exists "upload user images" on storage.objects;
 drop policy if exists "read chat images" on storage.objects;
 
+drop policy if exists "owners upload store and product images" on storage.objects;
 create policy "owners upload store and product images" on storage.objects
   for insert to authenticated
   with check (bucket_id in ('store-images', 'product-images') and public.is_owner_or_admin());
 
+drop policy if exists "users upload their own profile image" on storage.objects;
 create policy "users upload their own profile image" on storage.objects
   for insert to authenticated
   with check (bucket_id = 'profile-images'
               and (split_part(name, '/', 1) = auth.uid()::text or public.is_admin()));
 
+drop policy if exists "members upload chat images" on storage.objects;
 create policy "members upload chat images" on storage.objects
   for insert to authenticated
   with check (bucket_id = 'chat-images' and public.can_use_chat_image(name));
 
+drop policy if exists "members read chat images" on storage.objects;
 create policy "members read chat images" on storage.objects
   for select to authenticated
   using (bucket_id = 'chat-images' and public.can_use_chat_image(name));
