@@ -3,8 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:zing/Modal/types.dart';
-// 1) Import translator
-import 'package:translator/translator.dart';
+import 'package:zing/Service/ApiClient.dart';
 
 import '../Modal/ChatMessage.dart';
 import '../Service/ChatProvider.dart';
@@ -73,8 +72,9 @@ class _ChatScreenState extends State<ChatScreen> {
   Message? _replyToMessage;
   late Future<void> _fetchMessagesFuture;
 
-  // 2) Translator instance (unofficial GoogleTranslator)
-  final GoogleTranslator _translator = GoogleTranslator();
+  // 2) Translations come from the server (POST /translate), which keeps the
+  //    translation API key off the phone.
+  final Set<String> _translationsInFlight = {};
 
   // 3) Cache of translations: key = "${messageId}_${langCode}", value = "translated text"
   final Map<String, String> _translationCache = {};
@@ -416,22 +416,20 @@ class _ChatScreenState extends State<ChatScreen> {
 
     // 2) Not in cache => show "Translating..." placeholder
     //    while we do an async call
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Fire off the translation if we haven't yet
-      _translator
-          .translate(
-        originalText,
-        from: 'auto',        // detect source
-        to: _selectedLanguage,
-      )
-          .then((translation) {
-        _translationCache[cacheKey] = translation.text;
-        setState(() {}); // Rebuild to show translated text
-      })
-          .catchError((e) {
+    // Ask once per message and language, however many times this rebuilds.
+    if (_translationsInFlight.add(cacheKey)) {
+      final language = _selectedLanguage;
+      ApiClient.post('/translate', {'text': originalText, 'target': language})
+          .then((data) {
+        _translationCache[cacheKey] = (data['text'] as String?) ?? originalText;
+        if (mounted) setState(() {}); // Rebuild to show translated text
+      }).catchError((e) {
         debugPrint("Translation failed for message $messageId: $e");
-      });
-    });
+        // Show the original text rather than "Translating..." forever.
+        _translationCache[cacheKey] = originalText;
+        if (mounted) setState(() {});
+      }).whenComplete(() => _translationsInFlight.remove(cacheKey));
+    }
 
     return const Text(
       "Translating...",
