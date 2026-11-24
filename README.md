@@ -53,3 +53,35 @@ at a time or cancels it, and cancelling puts the stock back.
 Notifications reach the app through Supabase Realtime. Phone push notifications
 while the app is closed are not built yet (they need an FCM/APNs sender such as
 an Edge Function that reads a device-token table).
+
+## Server (Railway)
+
+`server/` is a small Express API for the jobs that need admin rights or a
+secret: deleting an account, an admin creating users, recording recommendation
+events, `GET /recommendations`, and `POST /translate` (chat translation, so the
+translation key never ships in the app). Everything else goes from the app to
+Supabase directly, protected by Row Level Security and the SQL rules above.
+
+Deploy on Railway:
+
+1. New service from this repo, root directory `server` (`railway.json` sets the
+   start command and the `/health` check).
+2. Set the variables listed in `server/.env.example`
+   (`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are required; the server
+   exits at start-up if they are missing).
+3. Put the public URL in the app's `.env` as `API_BASE_URL` and rebuild the app.
+4. Check `GET <url>/health` returns `{"ok":true,"supabase":true}`.
+
+## Tests
+
+| What | Command |
+|---|---|
+| App models | `flutter test` |
+| Server routes | `cd server && npm ci && npm test` |
+| Database rules | `PGHOST=127.0.0.1 PGUSER=postgres supabase/tests/run.sh` (any local Postgres; it builds a throwaway database per suite with stand-ins for Supabase's auth and storage) |
+
+The SQL suites cover order pricing, stock and cancellation, store expiry,
+profile privacy, upload rules and the permission gaps closed in `0007`. They
+run on plain Postgres, so they do not prove behaviour on a real Supabase
+project (PostgREST, Realtime, the storage API, pg_cron): check those on a
+staging project before going live.
