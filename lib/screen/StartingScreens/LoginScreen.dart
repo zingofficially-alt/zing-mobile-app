@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:ui';
@@ -47,10 +49,10 @@ String authErrorMessage(AuthException e) {
 }
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({Key? key}) : super(key: key);
+  const LoginScreen({super.key});
 
   @override
-  _LoginScreenState createState() => _LoginScreenState();
+  State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen>
@@ -157,8 +159,6 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   void _showTermsDialog() {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
 
     showDialog(
       context: context,
@@ -215,7 +215,7 @@ class _LoginScreenState extends State<LoginScreen>
                         horizontal: 16,
                       ),
                       decoration: BoxDecoration(
-                        color: dialogCs.primary.withOpacity(0.1),
+                        color: dialogCs.primary.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(
@@ -357,11 +357,11 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _loginWithPhoneNumber() async {
-    print("\n🔵 ========== PHONE LOGIN STARTED ==========");
-    print("🔵 Phone number from controller: '${phoneController.text}'");
+    debugPrint("\n🔵 ========== PHONE LOGIN STARTED ==========");
+    debugPrint("🔵 Phone number from controller: '${phoneController.text}'");
 
     if (_otpRetryCount >= _maxOtpRetries) {
-      print("❌ Max OTP retry attempts reached: $_otpRetryCount/$_maxOtpRetries");
+      debugPrint("❌ Max OTP retry attempts reached: $_otpRetryCount/$_maxOtpRetries");
       setState(() {
         _errorMessage = "Maximum attempts reached. Please try again later.";
       });
@@ -369,10 +369,10 @@ class _LoginScreenState extends State<LoginScreen>
     }
 
     String phoneNumber = phoneController.text.trim();
-    print("🔵 Trimmed phone number: '$phoneNumber'");
+    debugPrint("🔵 Trimmed phone number: '$phoneNumber'");
 
     if (!phoneNumber.startsWith('+94')) {
-      print("❌ Phone number validation failed: doesn't start with +94");
+      debugPrint("❌ Phone number validation failed: doesn't start with +94");
       setState(() {
         _errorMessage = "Phone number must start with +94";
       });
@@ -380,23 +380,23 @@ class _LoginScreenState extends State<LoginScreen>
     }
 
     String numberWithoutCode = phoneNumber.substring(3).replaceAll(RegExp(r'\D'), '');
-    print("🔵 Number without country code: '$numberWithoutCode' (length: ${numberWithoutCode.length})");
+    debugPrint("🔵 Number without country code: '$numberWithoutCode' (length: ${numberWithoutCode.length})");
 
     if (numberWithoutCode.length != 9 || !numberWithoutCode.startsWith('7')) {
-      print("❌ Phone number validation failed: invalid Sri Lankan format");
+      debugPrint("❌ Phone number validation failed: invalid Sri Lankan format");
       setState(() {
         _errorMessage = "Please enter a valid Sri Lankan mobile number";
       });
       return;
     }
 
-    print("✅ Phone number validation passed: $phoneNumber");
+    debugPrint("✅ Phone number validation passed: $phoneNumber");
     setState(() {
       isLoading = true;
       _errorMessage = null;
     });
 
-    print("🔵 Starting phone verification...");
+    debugPrint("🔵 Starting phone verification...");
     try {
       await _auth.signInWithOtp(phone: phoneNumber);
       if (mounted) {
@@ -418,10 +418,10 @@ class _LoginScreenState extends State<LoginScreen>
         HapticFeedback.heavyImpact();
       }
     } catch (e) {
-      print("\n❌ ========== EXCEPTION IN PHONE VERIFICATION ==========");
-      print("❌ Exception type: ${e.runtimeType}");
-      print("❌ Exception details: $e");
-      print("❌ Stack trace: ${StackTrace.current}");
+      debugPrint("\n❌ ========== EXCEPTION IN PHONE VERIFICATION ==========");
+      debugPrint("❌ Exception type: ${e.runtimeType}");
+      debugPrint("❌ Exception details: $e");
+      debugPrint("❌ Stack trace: ${StackTrace.current}");
 
       if (mounted) {
         setState(() {
@@ -431,7 +431,7 @@ class _LoginScreenState extends State<LoginScreen>
         HapticFeedback.heavyImpact();
       }
     }
-    print("🔵 ========== PHONE LOGIN METHOD ENDED ==========\n");
+    debugPrint("🔵 ========== PHONE LOGIN METHOD ENDED ==========\n");
   }
 
   void _showOTPDialog() {
@@ -470,7 +470,7 @@ class _LoginScreenState extends State<LoginScreen>
           String? otpError;
 
           void verifyOTP() async {
-            print("\n🔵 ========== OTP DIALOG VERIFICATION STARTED ==========");
+            debugPrint("\n🔵 ========== OTP DIALOG VERIFICATION STARTED ==========");
 
             setDialogState(() {
               isVerifying = true;
@@ -478,10 +478,10 @@ class _LoginScreenState extends State<LoginScreen>
             });
 
             String otp = controllers.map((controller) => controller.text).join();
-            print("🔵 OTP from dialog: '$otp' (length: ${otp.length})");
+            debugPrint("🔵 OTP from dialog: '$otp' (length: ${otp.length})");
 
             if (otp.length != 6) {
-              print("❌ OTP validation failed: length is ${otp.length}, expected 6");
+              debugPrint("❌ OTP validation failed: length is ${otp.length}, expected 6");
               setDialogState(() {
                 isVerifying = false;
                 otpError = "Please enter all 6 digits";
@@ -489,8 +489,8 @@ class _LoginScreenState extends State<LoginScreen>
               return;
             }
 
-            print("✅ OTP validation passed");
-            print("🔵 Verification ID: '$_verificationId'");
+            debugPrint("✅ OTP validation passed");
+            debugPrint("🔵 Verification ID: '$_verificationId'");
 
             try {
               if (_verificationId != null) {
@@ -502,12 +502,13 @@ class _LoginScreenState extends State<LoginScreen>
 
                 print("✅ Closing OTP dialog and navigating to home");
 
-                if (mounted) {
+                if (context.mounted) {
                   Navigator.pop(context); // Close dialog
+                  if (!context.mounted) return;
                   Navigator.pushReplacementNamed(context, '/home');
                 }
               } else {
-                print("❌ Verification ID is null in OTP dialog!");
+                debugPrint("❌ Verification ID is null in OTP dialog!");
                 setDialogState(() {
                   isVerifying = false;
                   otpError = "Verification session expired. Please try again.";
@@ -523,16 +524,16 @@ class _LoginScreenState extends State<LoginScreen>
                 focusNodes[0].requestFocus();
               });
             } catch (e) {
-              print("\n❌ ========== OTP DIALOG EXCEPTION ==========");
-              print("❌ Exception type: ${e.runtimeType}");
-              print("❌ Exception details: $e");
+              debugPrint("\n❌ ========== OTP DIALOG EXCEPTION ==========");
+              debugPrint("❌ Exception type: ${e.runtimeType}");
+              debugPrint("❌ Exception details: $e");
 
               setDialogState(() {
                 isVerifying = false;
                 otpError = "Unexpected error: ${e.toString()}";
               });
             }
-            print("🔵 ========== OTP DIALOG VERIFICATION ENDED ==========\n");
+            debugPrint("🔵 ========== OTP DIALOG VERIFICATION ENDED ==========\n");
           }
 
           return BackdropFilter(
@@ -735,7 +736,7 @@ class _LoginScreenState extends State<LoginScreen>
       List<TextEditingController> controllers,
       List<FocusNode> focusNodes,
       ) async {
-    print("\n🔵 ========== AUTO-SUBMIT OTP VERIFICATION ==========");
+    debugPrint("\n🔵 ========== AUTO-SUBMIT OTP VERIFICATION ==========");
 
     try {
       if (_verificationId != null) {
@@ -750,7 +751,7 @@ class _LoginScreenState extends State<LoginScreen>
         }
       }
     } catch (e) {
-      print("❌ Auto-submit verification failed: $e");
+      debugPrint("❌ Auto-submit verification failed: $e");
     }
   }
 
@@ -800,10 +801,10 @@ class _LoginScreenState extends State<LoginScreen>
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    cs.primary.withOpacity(0.08),
+                    cs.primary.withValues(alpha: 0.08),
                     cs.surface,
                     cs.surface,
-                    cs.primary.withOpacity(0.04),
+                    cs.primary.withValues(alpha: 0.04),
                   ],
                 ),
               ),
@@ -951,10 +952,10 @@ class _LoginScreenState extends State<LoginScreen>
                                   vertical: 12,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: cs.error.withOpacity(0.08),
+                                  color: cs.error.withValues(alpha: 0.08),
                                   borderRadius: BorderRadius.circular(8),
                                   border: Border.all(
-                                    color: cs.error.withOpacity(0.3),
+                                    color: cs.error.withValues(alpha: 0.3),
                                     width: 1,
                                   ),
                                 ),
@@ -987,33 +988,7 @@ class _LoginScreenState extends State<LoginScreen>
                               isLoading: isLoading,
                             ),
 
-                            const SizedBox(height: 24),
-
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Container(
-                                    height: 1,
-                                    color: cs.outline,
-                                  ),
-                                ),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                                  child: Text(
-                                    "Or continue with",
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: cs.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Container(
-                                    height: 1,
-                                    color: cs.outline,
-                                  ),
-                                ),
-                              ],
-                            ),
+                            const SizedBox(height: 4),
 
                             const SizedBox(height: 32),
 
@@ -1075,6 +1050,19 @@ class _LoginScreenState extends State<LoginScreen>
               ),
             ),
           ),
+          if (Navigator.of(context).canPop())
+            SafeArea(
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 4, top: 4),
+                  child: CupertinoButton(
+                    onPressed: () => Navigator.of(context).maybePop(),
+                    child: Text('Not now', style: ZingType.body(cs.primary)),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -1305,13 +1293,13 @@ class _LoginScreenState extends State<LoginScreen>
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: cs.primary.withOpacity(0.3),
+            color: cs.primary.withValues(alpha: 0.3),
             blurRadius: 20,
             offset: const Offset(0, 10),
           ),
         ],
         gradient: LinearGradient(
-          colors: [cs.primary, cs.primary.withOpacity(0.75)],
+          colors: [cs.primary, cs.primary.withValues(alpha: 0.75)],
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
         ),

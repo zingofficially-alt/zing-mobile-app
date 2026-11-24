@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
@@ -7,21 +8,23 @@ import 'package:zing/Modal/CoustomUser.dart';
 import 'package:zing/Service/OrderProvider.dart';
 import 'package:animate_do/animate_do.dart';
 import 'package:zing/screen/UserScreens/EditeUser.dart';
-import '../../Service/CoustomUserProvider.dart';
+import 'package:zing/Service/CoustomUserProvider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:zing/Service/StoreProvider.dart';
 import 'package:zing/Service/ThemeProvider.dart';
+import 'package:zing/Widgets/Shared/zing_ios.dart';
+import 'package:zing/Widgets/Shared/zing_motion.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final Product product;
   final Store store;
 
-  ProductDetailScreen({required this.product, required this.store});
+  const ProductDetailScreen({super.key, required this.product, required this.store});
 
   @override
-  _ProductDetailScreenState createState() => _ProductDetailScreenState();
+  State<ProductDetailScreen> createState() => _ProductDetailScreenState();
 }
 
 class _ProductDetailScreenState extends State<ProductDetailScreen> with SingleTickerProviderStateMixin {
@@ -116,7 +119,7 @@ https://play.google.com/store/apps/details?id=com.zing.app
         final cs = Theme.of(context).colorScheme;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Could not share product'),
+            content: const Text('Could not share product'),
             backgroundColor: cs.error,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -201,6 +204,17 @@ https://play.google.com/store/apps/details?id=com.zing.app
   }
 
   void _increaseQuantity() {
+    // Never let the customer pick more than the store has in stock.
+    if (quantity >= widget.product.quantity) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Only ${widget.product.quantity} in stock'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
     setState(() {
       quantity++;
     });
@@ -218,615 +232,341 @@ https://play.google.com/store/apps/details?id=com.zing.app
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
     final cart = Provider.of<CartProvider>(context);
     final orderProvider = Provider.of<OrderProvider>(context, listen: false);
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
 
     return Scaffold(
-      backgroundColor: cs.surface,
-      extendBodyBehindAppBar: true,
-      appBar: _buildAppBar(),
-      body: Stack(
-        children: [
-          // Main content - Always show products, login not required for browsing
-          SingleChildScrollView(
-            physics: BouncingScrollPhysics(),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Product Image
-                _buildProductImage(screenHeight),
-
-                // Product Info
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Store name
-                      _buildStoreInfo(),
-                      SizedBox(height: 16),
-
-                      // Product name and price
-                      _buildProductHeader(),
-                      SizedBox(height: 24),
-
-                      // Quantity selector
-                      _buildQuantitySelector(),
-                      SizedBox(height: 24),
-
-                      // Description
-                      _buildDescription(),
-                      SizedBox(height: 24),
-
-                      // Delivery options
-                      _buildDeliveryOptions(),
-                      SizedBox(height: 24),
-
-                      // Related products
-                      _buildRelatedProducts(),
-                    ],
-                  ),
-                ),
-              ],
+      extendBody: true,
+      body: CustomScrollView(
+        slivers: [
+          _buildHeroBar(),
+          SliverToBoxAdapter(child: _buildProductHeader()),
+          SliverToBoxAdapter(child: _buildQuantitySelector()),
+          SliverToBoxAdapter(child: _buildDescription()),
+          SliverToBoxAdapter(child: _buildStoreInfo()),
+          SliverToBoxAdapter(child: _buildDeliveryOptions()),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _buildRelatedProducts(),
             ),
           ),
-
-          // Action buttons at bottom
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: _buildActionButtons(cart, orderProvider),
-          ),
+          SliverToBoxAdapter(child: SizedBox(height: MediaQuery.paddingOf(context).bottom + 120)),
         ],
       ),
+      bottomNavigationBar: _buildActionButtons(cart, orderProvider),
     );
   }
 
-  PreferredSizeWidget _buildAppBar() {
+  /// Square product photo that stretches on pull-down and collapses into a
+  /// frosted bar with the product name.
+  Widget _buildHeroBar() {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final width = MediaQuery.sizeOf(context).width;
+    final topInset = MediaQuery.paddingOf(context).top;
+    const toolbar = 48.0;
+    final expandedHeight = width * 0.95;
 
-    return AppBar(
-      elevation: 0,
-      backgroundColor: Colors.transparent,
-      leading: GestureDetector(
-        onTap: () {
-          HapticFeedback.lightImpact();
-          Navigator.pop(context);
-        },
-        child: Container(
-          margin: const EdgeInsets.all(8),
+    return SliverLayoutBuilder(
+      builder: (context, constraints) {
+        final collapsed = constraints.scrollOffset > expandedHeight - toolbar - 40;
+        return SliverAppBar(
+          pinned: true,
+          stretch: true,
+          expandedHeight: expandedHeight,
+          toolbarHeight: toolbar,
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          automaticallyImplyLeading: false,
+          systemOverlayStyle: theme.brightness == Brightness.dark
+              ? SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent)
+              : SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
+          leadingWidth: 60,
+          leading: Center(
+            child: _GlassIconButton(
+              icon: CupertinoIcons.chevron_back,
+              plain: collapsed,
+              onTap: () => Navigator.of(context).maybePop(),
+            ),
+          ),
+          centerTitle: true,
+          title: AnimatedOpacity(
+            opacity: collapsed ? 1 : 0,
+            duration: ZingMotion.fast,
+            child: Text(widget.product.name, style: ZingType.headline(cs.onSurface)),
+          ),
+          actions: [
+            _GlassIconButton(icon: CupertinoIcons.share, plain: collapsed, onTap: _shareProduct),
+            const SizedBox(width: 12),
+          ],
+          flexibleSpace: LayoutBuilder(
+            builder: (context, c) {
+              final minH = toolbar + topInset;
+              final t = ((c.maxHeight - minH) / (expandedHeight + topInset - minH)).clamp(0.0, 1.0);
+              final glass = ((0.25 - t) / 0.25).clamp(0.0, 1.0);
+              return Stack(
+                fit: StackFit.expand,
+                children: [
+                  FlexibleSpaceBar(
+                    collapseMode: CollapseMode.parallax,
+                    stretchModes: const [StretchMode.zoomBackground],
+                    background: _buildProductImage(),
+                  ),
+                  if (glass > 0)
+                    IgnorePointer(
+                      child: Opacity(
+                        opacity: glass,
+                        child: ZingGlass(
+                          color: theme.scaffoldBackgroundColor,
+                          opacity: 0.82,
+                          border: Border(
+                            bottom: BorderSide(color: cs.outline.withValues(alpha: 0.5), width: 0.5),
+                          ),
+                          child: const SizedBox.expand(),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildProductImage() {
+    final cs = Theme.of(context).colorScheme;
+    final product = widget.product;
+    final hasDiscount = product.discount != null && product.discount! > 0;
+    final fallback = Container(
+      color: cs.surfaceContainerHighest,
+      child: Icon(CupertinoIcons.photo, color: cs.onSurfaceVariant, size: 56),
+    );
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Hero(
+          tag: 'product-${product.id}',
+          child: (product.imageUrl ?? '').isEmpty
+              ? fallback
+              : CachedNetworkImage(
+                  imageUrl: product.imageUrl!,
+                  fit: BoxFit.cover,
+                  placeholder: (_, __) => ColoredBox(color: cs.surfaceContainerHighest),
+                  errorWidget: (_, __, ___) => fallback,
+                ),
+        ),
+        const DecoratedBox(
           decoration: BoxDecoration(
-            color: cs.surface,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0x40000000), Color(0x00000000)],
+              stops: [0, 0.3],
+            ),
+          ),
+        ),
+        if (hasDiscount)
+          Positioned(
+            left: 16,
+            bottom: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: ZingColors.secondary,
+                borderRadius: BorderRadius.circular(100),
               ),
-            ],
-          ),
-          child: Icon(
-            Icons.arrow_back_rounded,
-            color: cs.onSurface,
-          ),
-        ),
-      ),
-      actions: [
-        GestureDetector(
-          onTap: () async {
-            HapticFeedback.lightImpact();
-
-            // Check if user is logged in
-            if (currentUser == null) {
-              await _showLoginDialog(context);
-              return;
-            }
-
-            // Add to favorites logic
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  "Added to favorites!",
-                ),
-                backgroundColor: cs.primary,
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
+              child: Text(
+                '${product.discount!.toStringAsFixed(0)}% OFF',
+                style: ZingType.style(13, weight: FontWeight.w700, color: Colors.white),
               ),
-            );
-          },
-          child: Container(
-            margin: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: cs.surface,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Icon(
-              Icons.favorite_border_rounded,
-              color: cs.onSurface,
             ),
           ),
-        ),
-        GestureDetector(
-          onTap: () {
-            HapticFeedback.lightImpact();
-            _shareProduct();
-          },
-          child: Container(
-            margin: const EdgeInsets.all(8),
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: cs.surface,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Icon(
-              Icons.share_rounded,
-              color: cs.onSurface,
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
       ],
     );
   }
 
-  Widget _buildErrorState() {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.error_outline_rounded,
-            size: 70,
-            color: cs.error.withOpacity(0.7),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            "Oops! Something went wrong",
-            style: theme.textTheme.headlineSmall?.copyWith(
-              color: cs.onSurface,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40),
-            child: Text(
-              errorMessage ?? "An unknown error occurred",
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: () {
-              setState(() {
-                isLoading = true;
-                errorMessage = null;
-              });
-              fetchCurrentUser();
-            },
-            icon: Icon(Icons.refresh_rounded),
-            label: Text(
-              "Try Again",
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: cs.onPrimary,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: cs.primary,
-              foregroundColor: cs.onPrimary,
-              padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNoUserState() {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.person_off_rounded,
-            size: 70,
-            color: cs.onSurfaceVariant.withOpacity(0.7),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            "User Not Found",
-            style: theme.textTheme.headlineSmall?.copyWith(
-              color: cs.onSurface,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40),
-            child: Text(
-              "Please sign in to view product details and place orders",
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: () {
-              // Navigate to login screen
-            },
-            icon: Icon(Icons.login_rounded),
-            label: Text(
-              "Sign In",
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: cs.onPrimary,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: cs.primary,
-              foregroundColor: cs.onPrimary,
-              padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProductImage(double screenHeight) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    return Hero(
-      tag: widget.product.imageUrl ?? '',
-      child: Container(
-        height: screenHeight * 0.45,
-        width: double.infinity,
-        child: Stack(
-          children: [
-            // Product image
-            Positioned.fill(
-              child: ClipRRect(
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(30),
-                  bottomRight: Radius.circular(30),
-                ),
-                child: CachedNetworkImage(
-                  imageUrl: widget.product.imageUrl ?? '',
-                  fit: BoxFit.cover,
-                  placeholder: (context, url) => Shimmer.fromColors(
-                    baseColor: cs.outline,
-                    highlightColor: cs.surfaceContainerHighest,
-                    child: Container(
-                      color: cs.surface,
-                    ),
-                  ),
-                  errorWidget: (context, url, error) => Container(
-                    color: cs.surfaceContainerHighest,
-                    child: Icon(
-                      Icons.image_not_supported_rounded,
-                      color: cs.onSurfaceVariant,
-                      size: 50,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
-            // Gradient overlay at bottom for better text contrast
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                height: 100,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.transparent,
-                      Colors.black.withOpacity(0.5),
-                    ],
-                  ),
-                  borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(30),
-                    bottomRight: Radius.circular(30),
-                  ),
-                ),
-              ),
-            ),
-
-            // Availability badge - Check both isAvailable and quantity
-            if (widget.product.isAvailable && widget.product.quantity > 0)
-              Positioned(
-                top: 16,
-                right: 16,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: ZingColors.success,
-                    borderRadius: BorderRadius.circular(50),
-                    boxShadow: [
-                      BoxShadow(
-                        color: ZingColors.success.withOpacity(0.3),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.check_circle_rounded,
-                        color: cs.onPrimary,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        "In Stock (${widget.product.quantity})",
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: cs.onPrimary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else
-              Positioned(
-                top: 16,
-                right: 16,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: cs.error,
-                    borderRadius: BorderRadius.circular(50),
-                    boxShadow: [
-                      BoxShadow(
-                        color: cs.error.withOpacity(0.3),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.cancel_rounded,
-                        color: cs.onPrimary,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        "Out of Stock",
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: cs.onPrimary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-            // Discount badge (if applicable)
-            if (widget.product.discount != null && widget.product.discount! > 0)
-              Positioned(
-                top: 16,
-                left: 16,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: cs.error,
-                    borderRadius: BorderRadius.circular(50),
-                    boxShadow: [
-                      BoxShadow(
-                        color: cs.error.withOpacity(0.3),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.local_offer_rounded,
-                        color: cs.onPrimary,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        "${widget.product.discount}% OFF",
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: cs.onPrimary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
+  /// "Sold by" row that leads back to the store.
   Widget _buildStoreInfo() {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    return Row(
+    return ZingGroupedSection(
+      header: 'Sold by',
       children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: cs.primary.withOpacity(0.1),
-            shape: BoxShape.circle,
-          ),
-          child: Center(
-            child: Icon(
-              Icons.store_rounded,
-              color: cs.primary,
-              size: 20,
+        ZingListRow(
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              width: 36,
+              height: 36,
+              child: widget.store.imageUrl.isEmpty
+                  ? const ZingIconTile(icon: CupertinoIcons.bag_fill, color: ZingColors.primary, size: 36)
+                  : CachedNetworkImage(imageUrl: widget.store.imageUrl, fit: BoxFit.cover),
             ),
           ),
+          title: widget.store.name,
+          subtitle: widget.store.category,
+          onTap: () => Navigator.of(context).maybePop(),
         ),
-        const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "Sold by",
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-            Text(
-              widget.store.name,
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: cs.onSurface,
-              ),
-            ),
-          ],
-        ),
-        const Spacer(),
-        if (widget.product.rating != null)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: ZingColors.warning.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: ZingColors.warning.withOpacity(0.5),
-                width: 1,
-              ),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.star_rounded,
-                  color: ZingColors.warning,
-                  size: 16,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  "${widget.product.rating!}",
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: cs.onSurface,
-                  ),
-                ),
-              ],
-            ),
-          ),
       ],
     );
   }
 
   Widget _buildProductHeader() {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
+    final cs = Theme.of(context).colorScheme;
+    final product = widget.product;
+    final hasDiscount = product.discount != null && product.discount! > 0;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    final (String stockLabel, Color stockColor) = !product.inStock
+        ? ('Out of stock', ZingColors.error)
+        : product.lowStock
+            ? ('Only ${product.quantity} left', ZingColors.warning)
+            : ('In stock', ZingColors.success);
+
+    return ZingReveal(
+      offset: 16,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(product.name, style: ZingType.title1(cs.onSurface)),
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(
+                  'Rs ${product.effectivePrice.toStringAsFixed(product.effectivePrice % 1 == 0 ? 0 : 2)}',
+                  style: ZingType.title2(cs.onSurface),
+                ),
+                if (hasDiscount) ...[
+                  const SizedBox(width: 10),
+                  Text(
+                    'Rs ${product.price.toStringAsFixed(0)}',
+                    style: ZingType.body(cs.onSurfaceVariant)
+                        .copyWith(decoration: TextDecoration.lineThrough),
+                  ),
+                ],
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: stockColor.withValues(alpha: 0.13),
+                    borderRadius: BorderRadius.circular(100),
+                  ),
+                  child: Text(stockLabel,
+                      style: ZingType.style(13, weight: FontWeight.w600, color: stockColor)),
+                ),
+              ],
+            ),
+            if (product.rating != null && product.rating! > 0) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(CupertinoIcons.star_fill, size: 14, color: ZingColors.warning),
+                  const SizedBox(width: 4),
+                  Text(product.rating!.toStringAsFixed(1), style: ZingType.subhead(cs.onSurfaceVariant)),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuantitySelector() {
+    if (!widget.product.inStock) return const SizedBox.shrink();
+    final cs = Theme.of(context).colorScheme;
+    return ZingGroupedSection(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       children: [
-        // Product name
-        FadeInLeft(
-          duration: Duration(milliseconds: 500),
-          child: Text(
-            widget.product.name,
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontSize: 24,
-              fontWeight: FontWeight.w700,
-              color: cs.onSurface,
-              height: 1.2,
+        ZingListRow(
+          icon: CupertinoIcons.number,
+          iconColor: ZingColors.primary,
+          title: 'Quantity',
+          trailing: Container(
+            decoration: BoxDecoration(
+              color: cs.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildQuantityButton(CupertinoIcons.minus, quantity > 1 ? _decreaseQuantity : null),
+                SizedBox(
+                  width: 36,
+                  child: AnimatedSwitcher(
+                    duration: ZingMotion.fast,
+                    transitionBuilder: (child, a) => ScaleTransition(scale: a, child: child),
+                    child: Text(
+                      '$quantity',
+                      key: ValueKey(quantity),
+                      textAlign: TextAlign.center,
+                      style: ZingType.headline(cs.onSurface),
+                    ),
+                  ),
+                ),
+                _buildQuantityButton(CupertinoIcons.plus,
+                    quantity < widget.product.quantity ? _increaseQuantity : null),
+              ],
             ),
           ),
         ),
-        const SizedBox(height: 12),
+      ],
+    );
+  }
 
-        // Price
-        FadeInRight(
-          duration: Duration(milliseconds: 500),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
+  Widget _buildQuantityButton(IconData icon, VoidCallback? onPressed) {
+    final cs = Theme.of(context).colorScheme;
+    return CupertinoButton(
+      padding: EdgeInsets.zero,
+      minimumSize: const Size(40, 34),
+      onPressed: onPressed == null
+          ? null
+          : () {
+              HapticFeedback.selectionClick();
+              onPressed();
+            },
+      child: Icon(icon, size: 18, color: onPressed == null ? cs.onSurfaceVariant.withValues(alpha: 0.4) : cs.onSurface),
+    );
+  }
+
+  Widget _buildDescription() {
+    final cs = Theme.of(context).colorScheme;
+    final description = (widget.product.description ?? '').trim();
+    if (description.isEmpty) return const SizedBox.shrink();
+    final isLong = description.length > 160;
+
+    return ZingGroupedSection(
+      header: 'About this item',
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // If there's a discount, show the reduced price
-              if (widget.product.discount != null && widget.product.discount! > 0) ...[
-                // Calculate discounted price
-                Text(
-                  "Rs. ${((widget.product.price) * (1 - widget.product.discount! / 100)).toStringAsFixed(2)}",
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w700,
-                    color: cs.primary,
-                  ),
+              AnimatedSize(
+                duration: ZingMotion.medium,
+                curve: ZingMotion.emphasized,
+                alignment: Alignment.topCenter,
+                child: Text(
+                  description,
+                  maxLines: isLong && !showMoreDescription ? 4 : null,
+                  overflow: isLong && !showMoreDescription ? TextOverflow.ellipsis : null,
+                  style: ZingType.body(cs.onSurface).copyWith(height: 1.45),
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  "Rs. ${widget.product.price.toStringAsFixed(2)}",
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w500,
-                    color: cs.onSurfaceVariant,
-                    decoration: TextDecoration.lineThrough,
-                    decorationColor: cs.onSurfaceVariant,
-                  ),
-                ),
-              ] else
-                Text(
-                  "Rs. ${widget.product.price.toStringAsFixed(2)}",
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w700,
-                    color: cs.primary,
-                  ),
+              ),
+              if (isLong)
+                CupertinoButton(
+                  padding: const EdgeInsets.only(top: 6),
+                  minimumSize: Size.zero,
+                  onPressed: () => setState(() => showMoreDescription = !showMoreDescription),
+                  child: Text(showMoreDescription ? 'Less' : 'More', style: ZingType.body(cs.primary)),
                 ),
             ],
           ),
@@ -835,234 +575,24 @@ https://play.google.com/store/apps/details?id=com.zing.app
     );
   }
 
-  Widget _buildQuantitySelector() {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    return FadeInUp(
-      duration: Duration(milliseconds: 500),
-      child: Container(
-        padding: const EdgeInsets.all(6),
-        decoration: BoxDecoration(
-          color: cs.surface,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: ZingShadows.soft,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildQuantityButton(Icons.remove_rounded, _decreaseQuantity),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                quantity.toString(),
-                style: theme.textTheme.titleLarge?.copyWith(
-                  color: cs.onSurface,
-                ),
-              ),
-            ),
-            _buildQuantityButton(Icons.add_rounded, _increaseQuantity),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildQuantityButton(IconData icon, VoidCallback onPressed) {
-    final cs = Theme.of(context).colorScheme;
-
-    return GestureDetector(
-      onTap: onPressed,
-      child: Container(
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          color: cs.primary.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Icon(
-          icon,
-          color: cs.primary,
-          size: 20,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDescription() {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    // Use a default description if none is provided
-    final description = widget.product.description ?? "No product description available. This product is provided by ${widget.store.name}.";
-
-    // Determine if the description is long enough to need a "Show More" button
-    final isLongDescription = description.length > 100;
-
-    return FadeInUp(
-      duration: Duration(milliseconds: 500),
-      delay: Duration(milliseconds: 100),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: cs.surface,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: ZingShadows.soft,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.description_rounded,
-                  color: cs.primary,
-                  size: 20,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  "Product Description",
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    color: cs.onSurface,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              isLongDescription && !showMoreDescription
-                  ? description.substring(0, 100) + "..."
-                  : description,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: cs.onSurfaceVariant,
-                height: 1.5,
-              ),
-            ),
-
-            // Show More button for long descriptions
-            if (isLongDescription)
-              TextButton(
-                onPressed: () {
-                  HapticFeedback.lightImpact();
-                  setState(() {
-                    showMoreDescription = !showMoreDescription;
-                  });
-                },
-                style: TextButton.styleFrom(
-                  foregroundColor: cs.primary,
-                  padding: EdgeInsets.zero,
-                  minimumSize: Size(0, 30),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: Text(
-                  showMoreDescription ? "Show Less" : "Show More",
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: cs.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildDeliveryOptions() {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    // Check if delivery options exist
-    if (widget.store.deliveryOptions == null || widget.store.deliveryOptions!.isEmpty) {
-      return SizedBox.shrink();
-    }
-
-    return FadeInUp(
-      duration: Duration(milliseconds: 500),
-      delay: Duration(milliseconds: 200),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: cs.surface,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: ZingShadows.soft,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.local_shipping_rounded,
-                  color: cs.primary,
-                  size: 20,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  "Delivery Options",
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    color: cs.onSurface,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-
-            // List of delivery options
-            Column(
-              children: widget.store.deliveryOptions!.map((option) {
-                IconData icon;
-                Color color;
-
-                // Set appropriate icon and color for each type
-                if (option.contains("Home Delivery")) {
-                  icon = Icons.home_rounded;
-                  color = cs.tertiary;
-                } else if (option.contains("Pickup")) {
-                  icon = Icons.store_rounded;
-                  color = ZingColors.warning;
-                } else {
-                  icon = Icons.local_shipping_rounded;
-                  color = cs.primary;
-                }
-
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 32,
-                        height: 32,
-                        decoration: BoxDecoration(
-                          color: color.withOpacity(0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          icon,
-                          color: color,
-                          size: 16,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          option.contains("Home Delivery") && widget.store.deliveryCost != null
-                              ? "Home Delivery (Rs. ${widget.store.deliveryCost!.toStringAsFixed(0)})"
-                              : option,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w500,
-                            color: cs.onSurface,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList(),
-            ),
-          ],
-        ),
-      ),
+    final options = widget.store.deliveryOptions ?? const <String>[];
+    if (options.isEmpty) return const SizedBox.shrink();
+    return ZingGroupedSection(
+      header: 'Delivery',
+      children: [
+        for (final option in options)
+          ZingListRow(
+            icon: option.contains('Home Delivery') ? CupertinoIcons.car_detailed : CupertinoIcons.bag_fill,
+            iconColor: option.contains('Home Delivery') ? ZingColors.success : ZingColors.warning,
+            title: option,
+            value: option.contains('Home Delivery')
+                ? (widget.store.deliveryCost != null
+                    ? 'Rs ${widget.store.deliveryCost!.toStringAsFixed(0)}'
+                    : null)
+                : 'Free',
+          ),
+      ],
     );
   }
 
@@ -1077,15 +607,15 @@ https://play.google.com/store/apps/details?id=com.zing.app
 
     // If there are no related products, don't show this section
     if (relatedProducts.isEmpty) {
-      return SizedBox.shrink();
+      return const SizedBox.shrink();
     }
 
     // Limit to 10 products maximum
     final displayProducts = relatedProducts.take(10).toList();
 
     return FadeInUp(
-      duration: Duration(milliseconds: 500),
-      delay: Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 500),
+      delay: const Duration(milliseconds: 300),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1098,11 +628,11 @@ https://play.google.com/store/apps/details?id=com.zing.app
           const SizedBox(height: 16),
 
           // Show actual products from the store
-          Container(
+          SizedBox(
             height: 200,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
-              physics: BouncingScrollPhysics(),
+              physics: const BouncingScrollPhysics(),
               itemCount: displayProducts.length,
               itemBuilder: (context, index) {
                 final product = displayProducts[index];
@@ -1137,7 +667,7 @@ https://play.google.com/store/apps/details?id=com.zing.app
                       children: [
                         // Product image
                         ClipRRect(
-                          borderRadius: BorderRadius.only(
+                          borderRadius: const BorderRadius.only(
                             topLeft: Radius.circular(16),
                             topRight: Radius.circular(16),
                           ),
@@ -1253,202 +783,119 @@ https://play.google.com/store/apps/details?id=com.zing.app
     );
   }
 
+  Future<void> _addToCart(CartProvider cart) async {
+    HapticFeedback.mediumImpact();
+    if (currentUser == null) {
+      await _showLoginDialog(context);
+      return;
+    }
+
+    // Don't let the cart hold more than the store has in stock.
+    final alreadyInCart = cart.items
+        .where((i) => i.id == widget.product.id)
+        .fold<int>(0, (sum, i) => sum + i.quantity);
+    if (alreadyInCart + quantity > widget.product.quantity) {
+      final left = widget.product.quantity - alreadyInCart;
+      showZingToast(
+        context,
+        left > 0
+            ? 'Only $left more can be added (${widget.product.quantity} in stock)'
+            : 'You already have all ${widget.product.quantity} in your bag',
+        error: true,
+      );
+      return;
+    }
+
+    final cartItem = CartItem(
+      id: widget.product.id,
+      name: widget.product.name,
+      price: widget.product.effectivePrice,
+      imageUrl: widget.product.imageUrl,
+      storeId: widget.store.id,
+      quantity: 1,
+    );
+
+    // CartProvider adds one unit per call.
+    for (int i = 0; i < quantity; i++) {
+      await cart.addItem(cartItem, context);
+    }
+
+    if (!mounted) return;
+    showZingToast(context, 'Added $quantity × ${widget.product.name} to your bag',
+        icon: CupertinoIcons.bag_fill_badge_plus);
+  }
+
+  /// Frosted bottom bar: total, Add to Bag and Buy Now.
   Widget _buildActionButtons(CartProvider cart, OrderProvider orderProvider) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final bool isOutOfStock = widget.product.quantity <= 0;
+    final outOfStock = !widget.product.inStock;
+    final total = widget.product.effectivePrice * quantity;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(24),
-          topRight: Radius.circular(24),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, -3),
-            spreadRadius: 1,
-          ),
-        ],
-      ),
+    return ZingGlass(
+      opacity: 0.8,
+      blur: 30,
+      color: theme.brightness == Brightness.dark ? const Color(0xFF161618) : const Color(0xFFF9F9F9),
+      border: Border(top: BorderSide(color: cs.outline.withValues(alpha: 0.55), width: 0.5)),
       child: SafeArea(
         top: false,
-        child: Row(
-          children: [
-            // Total price or Out of Stock message
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  isOutOfStock ? "Status" : "Total Price",
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: cs.onSurfaceVariant,
-                  ),
-                ),
-                Text(
-                  isOutOfStock
-                      ? "Out of Stock"
-                      : (widget.product.discount != null && widget.product.discount! > 0
-                          ? "Rs. ${((widget.product.price) * (1 - widget.product.discount! / 100) * quantity).toStringAsFixed(2)}"
-                          : "Rs. ${(widget.product.price * quantity).toStringAsFixed(2)}"),
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    color: isOutOfStock ? cs.error : cs.primary,
-                  ),
-                ),
-              ],
-            ),
-
-            const Spacer(),
-
-            // Add to cart button
-            GestureDetector(
-              onTapDown: isOutOfStock ? null : (_) => _animationController.forward(),
-              onTapUp: isOutOfStock ? null : (_) => _animationController.reverse(),
-              onTapCancel: isOutOfStock ? null : () => _animationController.reverse(),
-              onTap: isOutOfStock ? null : () async {
-                HapticFeedback.mediumImpact();
-
-                // Check if user is logged in
-                if (currentUser == null) {
-                  await _showLoginDialog(context);
-                  return;
-                }
-
-                // Calculate the effective price (with discount if applicable)
-                double effectivePrice = widget.product.discount != null && widget.product.discount! > 0
-                    ? (widget.product.price) * (1 - widget.product.discount! / 100)
-                    : widget.product.price;
-
-                // Create CartItem from Product
-                CartItem cartItem = CartItem(
-                  id: widget.product.id,
-                  name: widget.product.name,
-                  price: effectivePrice,
-                  imageUrl: widget.product.imageUrl,
-                  storeId: widget.store.id,
-                  quantity: 1,
-                );
-
-                // Add to cart multiple times based on quantity
-                // The CartProvider increments quantity by 1 for each add
-                for (int i = 0; i < quantity; i++) {
-                  await cart.addItem(cartItem, context);
-                }
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      "$quantity ${widget.product.name} added to cart!",
-                    ),
-                    backgroundColor: cs.primary,
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                );
-              },
-              child: AnimatedBuilder(
-                animation: _scaleAnimation,
-                builder: (context, child) {
-                  return Transform.scale(
-                    scale: _scaleAnimation.value,
-                    child: child,
-                  );
-                },
-                child: Opacity(
-                  opacity: isOutOfStock ? 0.5 : 1.0,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: cs.primary.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.shopping_cart_rounded,
-                          color: cs.primary,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          "Add to Cart",
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: cs.primary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
-            const SizedBox(width: 12),
-
-            // Buy now button
-            Expanded(
-              flex: 2,
-              child: GestureDetector(
-                onTapDown: isOutOfStock ? null : (_) => _animationController.forward(),
-                onTapUp: isOutOfStock ? null : (_) => _animationController.reverse(),
-                onTapCancel: isOutOfStock ? null : () => _animationController.reverse(),
-                onTap: isOutOfStock ? null : () async {
-                  HapticFeedback.mediumImpact();
-
-                  // Check if user is logged in
-                  if (currentUser == null) {
-                    await _showLoginDialog(context);
-                    return;
-                  }
-
-                  await _showDeliveryMethodDialog(context, currentUser!, orderProvider);
-                },
-                child: AnimatedBuilder(
-                  animation: _scaleAnimation,
-                  builder: (context, child) {
-                    return Transform.scale(
-                      scale: _scaleAnimation.value,
-                      child: child,
-                    );
-                  },
-                  child: Opacity(
-                    opacity: isOutOfStock ? 0.5 : 1.0,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      decoration: BoxDecoration(
-                        color: isOutOfStock ? cs.outline : cs.primary,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: (isOutOfStock ? cs.outline : cs.primary).withOpacity(0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      alignment: Alignment.center,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(outOfStock ? 'Unavailable' : 'Total',
+                        style: ZingType.footnote(cs.onSurfaceVariant)),
+                    AnimatedSwitcher(
+                      duration: ZingMotion.fast,
                       child: Text(
-                        "Buy Now",
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: cs.onPrimary,
-                        ),
+                        outOfStock ? 'Out of stock' : 'Rs ${total.toStringAsFixed(total % 1 == 0 ? 0 : 2)}',
+                        key: ValueKey(total),
+                        style: ZingType.title3(outOfStock ? ZingColors.error : cs.onSurface),
                       ),
                     ),
+                  ],
+                ),
+              ),
+              SizedBox(
+                width: 56,
+                child: ZingPressable(
+                  onTap: outOfStock ? null : () => _addToCart(cart),
+                  child: Container(
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: cs.primary.withValues(alpha: outOfStock ? 0.06 : 0.13),
+                      borderRadius: BorderRadius.circular(ZingRadius.md),
+                    ),
+                    child: Icon(CupertinoIcons.bag_badge_plus,
+                        color: outOfStock ? cs.onSurfaceVariant : cs.primary, size: 24),
                   ),
                 ),
               ),
-            ),
-          ],
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 150,
+                child: ZingButton(
+                  label: 'Buy Now',
+                  onPressed: outOfStock
+                      ? null
+                      : () async {
+                          HapticFeedback.mediumImpact();
+                          if (currentUser == null) {
+                            await _showLoginDialog(context);
+                            return;
+                          }
+                          if (!mounted) return;
+                          await _showDeliveryMethodDialog(context, currentUser!, orderProvider);
+                        },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1582,7 +1029,7 @@ https://play.google.com/store/apps/details?id=com.zing.app
                       return RadioListTile<String>(
                         activeColor: cs.primary,
                         tileColor: Colors.transparent,
-                        selectedTileColor: cs.primary.withOpacity(0.05),
+                        selectedTileColor: cs.primary.withValues(alpha: 0.05),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
@@ -1593,7 +1040,7 @@ https://play.google.com/store/apps/details?id=com.zing.app
                               width: 32,
                               height: 32,
                               decoration: BoxDecoration(
-                                color: color.withOpacity(0.1),
+                                color: color.withValues(alpha: 0.1),
                                 shape: BoxShape.circle,
                               ),
                               child: Icon(
@@ -1670,6 +1117,7 @@ https://play.google.com/store/apps/details?id=com.zing.app
 
       try {
         // Show loading indicator
+        if (!context.mounted) return;
         showDialog(
           context: context,
           barrierDismissible: false,
@@ -1719,15 +1167,22 @@ https://play.google.com/store/apps/details?id=com.zing.app
         );
 
         // Close loading dialog
+        if (!context.mounted) return;
         Navigator.pop(context);
+
+        // Stock changed; reload so screens show the new counts.
+        if (!context.mounted) return;
+        Provider.of<StoreProvider>(context, listen: false).fetchStores();
 
         // Show success dialog
         _showOrderSuccessDialog();
       } catch (e) {
         // Close loading dialog
+        if (!context.mounted) return;
         Navigator.pop(context);
 
         // Show error
+        if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text("Error placing order: $e"),
           backgroundColor: cs.error,
@@ -1764,10 +1219,10 @@ https://play.google.com/store/apps/details?id=com.zing.app
                   width: 100,
                   height: 100,
                   decoration: BoxDecoration(
-                    color: ZingColors.success.withOpacity(0.1),
+                    color: ZingColors.success.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(
+                  child: const Icon(
                     Icons.check_circle_rounded,
                     color: ZingColors.success,
                     size: 60,
@@ -1815,6 +1270,41 @@ https://play.google.com/store/apps/details?id=com.zing.app
           ),
         );
       },
+    );
+  }
+}
+/// Round frosted button over the product photo; a plain tinted icon once the
+/// bar has collapsed.
+class _GlassIconButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool plain;
+  const _GlassIconButton({required this.icon, required this.onTap, this.plain = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return ZingPressable(
+      onTap: onTap,
+      pressedScale: 0.88,
+      child: AnimatedSwitcher(
+        duration: ZingMotion.fast,
+        child: plain
+            ? SizedBox(
+                key: const ValueKey('plain'),
+                width: 36,
+                height: 36,
+                child: Icon(icon, color: cs.primary, size: 22),
+              )
+            : ZingGlass(
+                key: const ValueKey('glass'),
+                borderRadius: BorderRadius.circular(100),
+                color: Colors.white,
+                opacity: 0.75,
+                blur: 16,
+                child: SizedBox(width: 36, height: 36, child: Icon(icon, color: ZingColors.textDark, size: 19)),
+              ),
+      ),
     );
   }
 }

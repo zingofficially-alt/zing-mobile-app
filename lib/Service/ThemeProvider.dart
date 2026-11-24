@@ -1,42 +1,48 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons, CupertinoPageTransitionsBuilder, CupertinoTextThemeData, CupertinoThemeData;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Centralized design tokens — change once, apply everywhere.
+///
+/// The palette follows the iOS system colours: an indigo tint, pink accent,
+/// and the grouped grey / white surface pair that iOS uses for its own apps.
 class ZingColors {
-  // Primary brand — vivid indigo
-  static const Color primary = Color(0xFF4361EE);
-  static const Color primaryLight = Color(0xFF6B84F3);
-  static const Color primaryDark = Color(0xFF2E4FD8);
+  // Tint — iOS system indigo
+  static const Color primary = Color(0xFF5856D6);
+  static const Color primaryLight = Color(0xFF7D7AFF);
+  static const Color primaryDark = Color(0xFF3634A3);
 
-  // Secondary — coral/rose accent
-  static const Color secondary = Color(0xFFF72585);
-  static const Color secondaryLight = Color(0xFFFF5FA3);
+  // Accent — iOS system pink
+  static const Color secondary = Color(0xFFFF2D55);
+  static const Color secondaryLight = Color(0xFFFF6482);
 
-  // Accent / teal
-  static const Color accent = Color(0xFF4CC9F0);
+  // Tertiary — iOS system cyan
+  static const Color accent = Color(0xFF32ADE6);
 
-  // Success / Warning / Error
-  static const Color success = Color(0xFF06D6A0);
-  static const Color warning = Color(0xFFFFBE0B);
-  static const Color error = Color(0xFFEF476F);
+  // Status — iOS system green / orange / red
+  static const Color success = Color(0xFF34C759);
+  static const Color warning = Color(0xFFFF9500);
+  static const Color error = Color(0xFFFF3B30);
 
-  // Neutral light palette — softer background for clean canvas
-  static const Color background = Color(0xFFFAFAFA);
+  // Light: grouped background with white cards
+  static const Color background = Color(0xFFF2F2F7);
   static const Color surface = Color(0xFFFFFFFF);
-  static const Color surfaceVariant = Color(0xFFF5F5F5);
-  static const Color textDark = Color(0xFF1A1D2E);
-  static const Color textMedium = Color(0xFF5A5D7A);
-  static const Color textLight = Color(0xFF9799B3);
-  static const Color divider = Color(0xFFE8E8E8);
+  static const Color surfaceVariant = Color(0xFFE5E5EA);
+  static const Color textDark = Color(0xFF1C1C1E);
+  static const Color textMedium = Color(0xFF636366);
+  static const Color textLight = Color(0xFF8E8E93);
+  static const Color divider = Color(0xFFD1D1D6);
 
-  // Neutral dark palette
-  static const Color darkBackground = Color(0xFF0E0F1A);
-  static const Color darkSurface = Color(0xFF1A1D2E);
-  static const Color darkSurfaceVariant = Color(0xFF252840);
-  static const Color darkTextDark = Color(0xFFF0F2FF);
-  static const Color darkTextMedium = Color(0xFFB0B3CC);
-  static const Color darkTextLight = Color(0xFF6B6E8A);
-  static const Color darkDivider = Color(0xFF2A2D45);
+  // Dark: true black with elevated greys
+  static const Color darkBackground = Color(0xFF000000);
+  static const Color darkSurface = Color(0xFF1C1C1E);
+  static const Color darkSurfaceVariant = Color(0xFF2C2C2E);
+  static const Color darkTextDark = Color(0xFFFFFFFF);
+  static const Color darkTextMedium = Color(0xFFAEAEB2);
+  static const Color darkTextLight = Color(0xFF8E8E93);
+  static const Color darkDivider = Color(0xFF38383A);
 }
 
 /// Spacing constants for consistent layout
@@ -44,589 +50,521 @@ class ZingSpacing {
   static const double xs = 4;
   static const double sm = 8;
   static const double md = 16;
-  static const double lg = 24;
+  static const double lg = 20;
   static const double xl = 32;
 }
 
-/// Shadow presets for consistent elevation
+/// Corner radii. iOS uses large continuous corners on cards and sheets.
+class ZingRadius {
+  static const double sm = 10;
+  static const double md = 14;
+  static const double lg = 20;
+  static const double xl = 28;
+}
+
+/// Shadow presets. iOS relies on surface contrast more than elevation, so
+/// these are deliberately faint.
 class ZingShadows {
   static List<BoxShadow> get soft => [
         BoxShadow(
-          color: Colors.black.withOpacity(0.04),
-          blurRadius: 8,
+          color: Colors.black.withValues(alpha: 0.04),
+          blurRadius: 10,
           offset: const Offset(0, 2),
         ),
       ];
 
   static List<BoxShadow> get medium => [
         BoxShadow(
-          color: Colors.black.withOpacity(0.06),
-          blurRadius: 16,
-          offset: const Offset(0, 4),
+          color: Colors.black.withValues(alpha: 0.08),
+          blurRadius: 24,
+          offset: const Offset(0, 8),
         ),
       ];
 
   static List<BoxShadow> get card => [
         BoxShadow(
-          color: ZingColors.primary.withOpacity(0.06),
-          blurRadius: 20,
-          offset: const Offset(0, 8),
+          color: Colors.black.withValues(alpha: 0.07),
+          blurRadius: 22,
+          offset: const Offset(0, 10),
         ),
         BoxShadow(
-          color: Colors.black.withOpacity(0.03),
-          blurRadius: 6,
-          offset: const Offset(0, 2),
+          color: Colors.black.withValues(alpha: 0.03),
+          blurRadius: 4,
+          offset: const Offset(0, 1),
         ),
       ];
 }
 
+/// iOS type scale. Apple devices use the system font (SF Pro); everywhere
+/// else falls back to Inter, which has near-identical metrics.
+class ZingType {
+  static bool get _apple =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.macOS);
+
+  static double _tracking(double size) {
+    if (_apple) {
+      if (size >= 20) return 0.36;
+      if (size >= 16) return -0.41;
+      if (size >= 14) return -0.24;
+      if (size >= 13) return -0.08;
+      return 0;
+    }
+    if (size >= 20) return -0.022 * size;
+    if (size >= 14) return -0.011 * size;
+    return 0;
+  }
+
+  static TextStyle style(
+    double size, {
+    FontWeight weight = FontWeight.w400,
+    Color? color,
+    double? height,
+    double? letterSpacing,
+  }) {
+    final base = TextStyle(
+      fontSize: size,
+      fontWeight: weight,
+      color: color,
+      height: height,
+      letterSpacing: letterSpacing ?? _tracking(size),
+    );
+    return _apple ? base : GoogleFonts.inter(textStyle: base);
+  }
+
+  static TextStyle largeTitle(Color c) => style(34, weight: FontWeight.w700, color: c, height: 1.2);
+  static TextStyle title1(Color c) => style(28, weight: FontWeight.w700, color: c, height: 1.2);
+  static TextStyle title2(Color c) => style(22, weight: FontWeight.w700, color: c, height: 1.25);
+  static TextStyle title3(Color c) => style(20, weight: FontWeight.w600, color: c, height: 1.25);
+  static TextStyle headline(Color c) => style(17, weight: FontWeight.w600, color: c, height: 1.3);
+  static TextStyle body(Color c) => style(17, color: c, height: 1.3);
+  static TextStyle callout(Color c) => style(16, color: c, height: 1.3);
+  static TextStyle subhead(Color c) => style(15, color: c, height: 1.35);
+  static TextStyle footnote(Color c) => style(13, color: c, height: 1.35);
+  static TextStyle caption(Color c) => style(12, color: c, height: 1.3);
+}
+
 class ThemeProvider with ChangeNotifier {
+  static const _darkKey = 'dark_mode';
+
+  ThemeProvider() {
+    _load();
+  }
+
   bool _isDarkMode = false;
 
   bool get isDarkMode => _isDarkMode;
 
   ThemeMode get themeMode => _isDarkMode ? ThemeMode.dark : ThemeMode.light;
 
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getBool(_darkKey);
+      if (saved != null && saved != _isDarkMode) {
+        _isDarkMode = saved;
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
   void toggleTheme(bool isDark) {
     _isDarkMode = isDark;
     notifyListeners();
+    SharedPreferences.getInstance().then((p) => p.setBool(_darkKey, isDark)).catchError((_) => false);
   }
 
-  ThemeData get lightTheme => ThemeData(
-    useMaterial3: true,
-    brightness: Brightness.light,
-    primaryColor: ZingColors.primary,
-    scaffoldBackgroundColor: ZingColors.background,
+  ThemeData get lightTheme => _build(Brightness.light);
 
-    colorScheme: const ColorScheme.light(
-      primary: ZingColors.primary,
+  ThemeData get darkTheme => _build(Brightness.dark);
+
+  ThemeData _build(Brightness brightness) {
+    final dark = brightness == Brightness.dark;
+
+    final tint = dark ? ZingColors.primaryLight : ZingColors.primary;
+    final background = dark ? ZingColors.darkBackground : ZingColors.background;
+    final surface = dark ? ZingColors.darkSurface : ZingColors.surface;
+    final fill = dark ? ZingColors.darkSurfaceVariant : ZingColors.surfaceVariant;
+    final label = dark ? ZingColors.darkTextDark : ZingColors.textDark;
+    final label2 = dark ? ZingColors.darkTextMedium : ZingColors.textMedium;
+    final label3 = dark ? ZingColors.darkTextLight : ZingColors.textLight;
+    final separator = dark ? ZingColors.darkDivider : ZingColors.divider;
+
+    final scheme = ColorScheme(
+      brightness: brightness,
+      primary: tint,
       onPrimary: Colors.white,
-      primaryContainer: ZingColors.surfaceVariant,
-      onPrimaryContainer: ZingColors.primaryDark,
+      primaryContainer: tint.withValues(alpha: dark ? 0.24 : 0.12),
+      onPrimaryContainer: dark ? ZingColors.primaryLight : ZingColors.primaryDark,
       secondary: ZingColors.secondary,
       onSecondary: Colors.white,
-      secondaryContainer: Color(0xFFFFE4F0),
-      onSecondaryContainer: Color(0xFF8B0045),
+      secondaryContainer: dark ? const Color(0xFF4A0A1A) : const Color(0xFFFFE5EA),
+      onSecondaryContainer: dark ? const Color(0xFFFFD6DE) : const Color(0xFF8A0F2A),
       tertiary: ZingColors.accent,
       onTertiary: Colors.white,
       error: ZingColors.error,
       onError: Colors.white,
-      surface: ZingColors.surface,
-      onSurface: ZingColors.textDark,
-      surfaceContainerHighest: ZingColors.surfaceVariant,
-      onSurfaceVariant: ZingColors.textMedium,
-      outline: ZingColors.divider,
-      shadow: Color(0x1A4361EE),
-    ),
+      surface: surface,
+      onSurface: label,
+      surfaceContainerLowest: surface,
+      surfaceContainerLow: surface,
+      surfaceContainer: dark ? ZingColors.darkSurfaceVariant : ZingColors.background,
+      surfaceContainerHigh: fill,
+      surfaceContainerHighest: fill,
+      onSurfaceVariant: label2,
+      outline: separator,
+      outlineVariant: separator.withValues(alpha: 0.6),
+      shadow: Colors.black.withValues(alpha: dark ? 0.5 : 0.12),
+      surfaceTint: Colors.transparent,
+    );
 
-    // Clean white app bar — minimal style
-    appBarTheme: AppBarTheme(
-      backgroundColor: ZingColors.surface,
-      foregroundColor: ZingColors.textDark,
-      elevation: 0,
-      scrolledUnderElevation: 0.5,
-      centerTitle: true,
-      surfaceTintColor: Colors.transparent,
-      titleTextStyle: GoogleFonts.poppins(
-        fontSize: 18,
-        fontWeight: FontWeight.w600,
-        color: ZingColors.textDark,
-        letterSpacing: 0.3,
-      ),
-      iconTheme: const IconThemeData(color: ZingColors.textDark, size: 24),
-      toolbarHeight: 60,
-    ),
-
-    // Material 3 bottom navigation bar
-    navigationBarTheme: NavigationBarThemeData(
-      height: 72,
-      backgroundColor: ZingColors.surface,
-      surfaceTintColor: Colors.transparent,
-      elevation: 0,
-      indicatorColor: ZingColors.primary.withOpacity(0.12),
-      labelTextStyle: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.selected)) {
-          return GoogleFonts.poppins(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: ZingColors.primary,
-          );
-        }
-        return GoogleFonts.poppins(
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-          color: ZingColors.textLight,
+    OutlineInputBorder inputBorder(Color color, [double width = 1]) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: color, width: width),
         );
-      }),
-      iconTheme: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.selected)) {
-          return const IconThemeData(color: ZingColors.primary, size: 24);
-        }
-        return const IconThemeData(color: ZingColors.textLight, size: 24);
-      }),
-    ),
 
-    // Search bar theme
-    searchBarTheme: SearchBarThemeData(
-      backgroundColor: WidgetStateProperty.all(ZingColors.surfaceVariant),
-      elevation: WidgetStateProperty.all(0),
-      hintStyle: WidgetStateProperty.all(
-        GoogleFonts.inter(color: ZingColors.textLight, fontSize: 14),
-      ),
-      textStyle: WidgetStateProperty.all(
-        GoogleFonts.inter(color: ZingColors.textDark, fontSize: 14),
-      ),
-      shape: WidgetStateProperty.all(
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      ),
-      padding: WidgetStateProperty.all(
-        const EdgeInsets.symmetric(horizontal: 16),
-      ),
-    ),
+    return ThemeData(
+      useMaterial3: true,
+      brightness: brightness,
+      colorScheme: scheme,
+      primaryColor: tint,
+      scaffoldBackgroundColor: background,
+      canvasColor: surface,
 
-    textTheme: TextTheme(
-      displayLarge: GoogleFonts.poppins(
-        color: ZingColors.textDark, fontSize: 32, fontWeight: FontWeight.w700, letterSpacing: -0.5,
-      ),
-      displayMedium: GoogleFonts.poppins(
-        color: ZingColors.textDark, fontSize: 26, fontWeight: FontWeight.w700,
-      ),
-      headlineLarge: GoogleFonts.poppins(
-        color: ZingColors.textDark, fontSize: 22, fontWeight: FontWeight.w700,
-      ),
-      headlineMedium: GoogleFonts.poppins(
-        color: ZingColors.textDark, fontSize: 20, fontWeight: FontWeight.w600,
-      ),
-      headlineSmall: GoogleFonts.poppins(
-        color: ZingColors.textDark, fontSize: 18, fontWeight: FontWeight.w600,
-      ),
-      titleLarge: GoogleFonts.poppins(
-        color: ZingColors.textDark, fontSize: 16, fontWeight: FontWeight.w600,
-      ),
-      titleMedium: GoogleFonts.poppins(
-        color: ZingColors.textDark, fontSize: 14, fontWeight: FontWeight.w600,
-      ),
-      titleSmall: GoogleFonts.poppins(
-        color: ZingColors.textMedium, fontSize: 12, fontWeight: FontWeight.w500,
-      ),
-      bodyLarge: GoogleFonts.inter(
-        color: ZingColors.textDark, fontSize: 16, fontWeight: FontWeight.w400, height: 1.5,
-      ),
-      bodyMedium: GoogleFonts.inter(
-        color: ZingColors.textMedium, fontSize: 14, fontWeight: FontWeight.w400, height: 1.5,
-      ),
-      bodySmall: GoogleFonts.inter(
-        color: ZingColors.textLight, fontSize: 12, fontWeight: FontWeight.w400, height: 1.4,
-      ),
-      labelLarge: GoogleFonts.poppins(
-        color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: 0.2,
-      ),
-      labelMedium: GoogleFonts.poppins(
-        color: ZingColors.textMedium, fontSize: 12, fontWeight: FontWeight.w500,
-      ),
-      labelSmall: GoogleFonts.poppins(
-        color: ZingColors.textLight, fontSize: 10, fontWeight: FontWeight.w500, letterSpacing: 0.4,
-      ),
-    ),
+      // iOS has no ink ripple: taps dim the control instead.
+      splashFactory: NoSplash.splashFactory,
+      highlightColor: label.withValues(alpha: 0.06),
+      splashColor: Colors.transparent,
+      hoverColor: label.withValues(alpha: 0.04),
 
-    elevatedButtonTheme: ElevatedButtonThemeData(
-      style: ElevatedButton.styleFrom(
-        foregroundColor: Colors.white,
-        backgroundColor: ZingColors.primary,
-        shadowColor: ZingColors.primary.withOpacity(0.3),
+      // Push/pop with the iOS slide and edge swipe-back on every platform.
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.windows: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.linux: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.fuchsia: CupertinoPageTransitionsBuilder(),
+        },
+      ),
+
+      cupertinoOverrideTheme: CupertinoThemeData(
+        brightness: brightness,
+        primaryColor: tint,
+        scaffoldBackgroundColor: background,
+        barBackgroundColor: surface.withValues(alpha: 0.8),
+        textTheme: CupertinoTextThemeData(
+          primaryColor: tint,
+          textStyle: ZingType.body(label),
+          actionTextStyle: ZingType.body(tint),
+          navTitleTextStyle: ZingType.headline(label),
+          navLargeTitleTextStyle: ZingType.largeTitle(label),
+          navActionTextStyle: ZingType.body(tint),
+          tabLabelTextStyle: ZingType.style(10, weight: FontWeight.w500, color: label3),
+        ),
+      ),
+
+      // Inline navigation bar: 44pt, centred 17pt semibold title, tinted actions.
+      appBarTheme: AppBarTheme(
+        backgroundColor: background,
+        foregroundColor: label,
         elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 28),
-        textStyle: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
-      ).copyWith(
-        elevation: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.pressed)) return 0;
-          if (states.contains(WidgetState.hovered)) return 4;
-          return 0;
+        scrolledUnderElevation: 0,
+        centerTitle: true,
+        surfaceTintColor: Colors.transparent,
+        titleTextStyle: ZingType.headline(label),
+        iconTheme: IconThemeData(color: tint, size: 24),
+        actionsIconTheme: IconThemeData(color: tint, size: 24),
+        toolbarHeight: 48,
+      ),
+
+      actionIconTheme: ActionIconThemeData(
+        backButtonIconBuilder: (_) => const Icon(CupertinoIcons.chevron_back, size: 26),
+        closeButtonIconBuilder: (_) => const Icon(CupertinoIcons.xmark, size: 22),
+      ),
+
+      navigationBarTheme: NavigationBarThemeData(
+        height: 56,
+        backgroundColor: surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        indicatorColor: Colors.transparent,
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
+          return ZingType.style(10, weight: FontWeight.w500, color: selected ? tint : label3);
         }),
-        overlayColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.pressed)) return Colors.white.withOpacity(0.15);
-          return null;
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
+          return IconThemeData(color: selected ? tint : label3, size: 26);
         }),
       ),
-    ),
 
-    outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(
-        foregroundColor: ZingColors.primary,
-        side: const BorderSide(color: ZingColors.primary, width: 1.5),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 28),
-        textStyle: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
+      searchBarTheme: SearchBarThemeData(
+        backgroundColor: WidgetStateProperty.all(fill),
+        elevation: WidgetStateProperty.all(0),
+        hintStyle: WidgetStateProperty.all(ZingType.body(label3)),
+        textStyle: WidgetStateProperty.all(ZingType.body(label)),
+        constraints: const BoxConstraints(minHeight: 40),
+        shape: WidgetStateProperty.all(
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+        padding: WidgetStateProperty.all(const EdgeInsets.symmetric(horizontal: 12)),
       ),
-    ),
 
-    textButtonTheme: TextButtonThemeData(
-      style: TextButton.styleFrom(
-        foregroundColor: ZingColors.primary,
-        textStyle: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      textTheme: TextTheme(
+        displayLarge: ZingType.largeTitle(label),
+        displayMedium: ZingType.title1(label),
+        displaySmall: ZingType.title2(label),
+        headlineLarge: ZingType.title1(label),
+        headlineMedium: ZingType.title2(label),
+        headlineSmall: ZingType.title3(label),
+        titleLarge: ZingType.headline(label),
+        titleMedium: ZingType.style(15, weight: FontWeight.w600, color: label, height: 1.3),
+        titleSmall: ZingType.style(13, weight: FontWeight.w500, color: label2, height: 1.3),
+        bodyLarge: ZingType.body(label),
+        bodyMedium: ZingType.subhead(label2),
+        bodySmall: ZingType.footnote(label3),
+        labelLarge: ZingType.style(16, weight: FontWeight.w600, color: label),
+        labelMedium: ZingType.style(12, weight: FontWeight.w500, color: label2),
+        labelSmall: ZingType.style(11, weight: FontWeight.w500, color: label3),
       ),
-    ),
 
-    inputDecorationTheme: InputDecorationTheme(
-      filled: true,
-      fillColor: ZingColors.surface,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: ZingColors.divider, width: 1),
+      // Filled button — the iOS prominent style.
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          foregroundColor: Colors.white,
+          backgroundColor: tint,
+          disabledBackgroundColor: fill,
+          disabledForegroundColor: label3,
+          shadowColor: Colors.transparent,
+          elevation: 0,
+          minimumSize: const Size(0, 48),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(ZingRadius.md)),
+          padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 22),
+          textStyle: ZingType.style(16, weight: FontWeight.w600),
+        ).copyWith(
+          elevation: WidgetStateProperty.all(0),
+          overlayColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.pressed)) return Colors.white.withValues(alpha: 0.22);
+            return Colors.transparent;
+          }),
+        ),
       ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: ZingColors.divider, width: 1),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: ZingColors.primary, width: 2),
-      ),
-      errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: ZingColors.error, width: 1.5),
-      ),
-      focusedErrorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: ZingColors.error, width: 2),
-      ),
-      hintStyle: GoogleFonts.inter(color: ZingColors.textLight, fontSize: 14),
-      labelStyle: GoogleFonts.inter(color: ZingColors.textMedium, fontSize: 14),
-      prefixIconColor: ZingColors.textMedium,
-      suffixIconColor: ZingColors.textMedium,
-    ),
 
-    floatingActionButtonTheme: FloatingActionButtonThemeData(
-      backgroundColor: ZingColors.primary,
-      foregroundColor: Colors.white,
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-    ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: tint,
+          foregroundColor: Colors.white,
+          minimumSize: const Size(0, 48),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(ZingRadius.md)),
+          textStyle: ZingType.style(16, weight: FontWeight.w600),
+        ),
+      ),
 
-    chipTheme: ChipThemeData(
-      backgroundColor: ZingColors.surfaceVariant,
-      selectedColor: ZingColors.primary.withOpacity(0.12),
-      labelStyle: GoogleFonts.poppins(
-        color: ZingColors.textMedium, fontSize: 12, fontWeight: FontWeight.w500,
+      // Tinted button — the iOS secondary style (soft fill, no outline).
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: tint,
+          backgroundColor: tint.withValues(alpha: dark ? 0.22 : 0.12),
+          side: BorderSide.none,
+          minimumSize: const Size(0, 48),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(ZingRadius.md)),
+          padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 22),
+          textStyle: ZingType.style(16, weight: FontWeight.w600),
+        ).copyWith(
+          overlayColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.pressed)) return tint.withValues(alpha: 0.12);
+            return Colors.transparent;
+          }),
+        ),
       ),
-      secondaryLabelStyle: GoogleFonts.poppins(
-        color: ZingColors.primary, fontSize: 12, fontWeight: FontWeight.w600,
-      ),
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-      elevation: 0,
-      pressElevation: 2,
-      side: const BorderSide(color: ZingColors.divider),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    ),
 
-    cardTheme: CardThemeData(
-      color: ZingColors.surface,
-      shadowColor: ZingColors.primary.withOpacity(0.08),
-      elevation: 0,
-      margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-        side: const BorderSide(color: ZingColors.divider, width: 0.5),
+      // Plain button — tinted text only.
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: tint,
+          textStyle: ZingType.style(16, weight: FontWeight.w500),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(ZingRadius.sm)),
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+        ).copyWith(
+          overlayColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.pressed)) return tint.withValues(alpha: 0.1);
+            return Colors.transparent;
+          }),
+        ),
       ),
-    ),
 
-    dividerTheme: const DividerThemeData(
-      color: ZingColors.divider,
-      thickness: 1,
-      space: 1,
-    ),
+      iconButtonTheme: IconButtonThemeData(
+        style: ButtonStyle(
+          overlayColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.pressed)) return label.withValues(alpha: 0.08);
+            return Colors.transparent;
+          }),
+        ),
+      ),
 
-    bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-      backgroundColor: ZingColors.surface,
-      selectedItemColor: ZingColors.primary,
-      unselectedItemColor: ZingColors.textLight,
-      elevation: 0,
-      type: BottomNavigationBarType.fixed,
-    ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: dark ? ZingColors.darkSurfaceVariant : ZingColors.surface,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        border: inputBorder(separator.withValues(alpha: 0.7)),
+        enabledBorder: inputBorder(separator.withValues(alpha: 0.7)),
+        focusedBorder: inputBorder(tint, 1.5),
+        errorBorder: inputBorder(ZingColors.error),
+        focusedErrorBorder: inputBorder(ZingColors.error, 1.5),
+        hintStyle: ZingType.callout(label3),
+        labelStyle: ZingType.callout(label2),
+        floatingLabelStyle: ZingType.callout(tint),
+        prefixIconColor: label3,
+        suffixIconColor: label3,
+      ),
 
-    snackBarTheme: SnackBarThemeData(
-      behavior: SnackBarBehavior.floating,
-      backgroundColor: ZingColors.textDark,
-      contentTextStyle: GoogleFonts.inter(color: Colors.white, fontSize: 13),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-    ),
-
-    listTileTheme: ListTileThemeData(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      iconColor: ZingColors.primary,
-    ),
-
-    progressIndicatorTheme: const ProgressIndicatorThemeData(
-      color: ZingColors.primary,
-      linearTrackColor: ZingColors.surfaceVariant,
-    ),
-
-    switchTheme: SwitchThemeData(
-      thumbColor: WidgetStateProperty.resolveWith((s) =>
-          s.contains(WidgetState.selected) ? ZingColors.primary : ZingColors.textLight),
-      trackColor: WidgetStateProperty.resolveWith((s) =>
-          s.contains(WidgetState.selected) ? ZingColors.primary.withOpacity(0.3) : ZingColors.divider),
-    ),
-
-    checkboxTheme: CheckboxThemeData(
-      fillColor: WidgetStateProperty.resolveWith((s) =>
-          s.contains(WidgetState.selected) ? ZingColors.primary : Colors.transparent),
-      checkColor: WidgetStateProperty.all(Colors.white),
-      side: const BorderSide(color: ZingColors.divider, width: 1.5),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
-    ),
-
-    radioTheme: RadioThemeData(
-      fillColor: WidgetStateProperty.resolveWith((s) =>
-          s.contains(WidgetState.selected) ? ZingColors.primary : ZingColors.textLight),
-    ),
-  );
-
-  ThemeData get darkTheme => ThemeData(
-    useMaterial3: true,
-    brightness: Brightness.dark,
-    primaryColor: ZingColors.primary,
-    scaffoldBackgroundColor: ZingColors.darkBackground,
-
-    colorScheme: const ColorScheme.dark(
-      primary: ZingColors.primaryLight,
-      onPrimary: Colors.white,
-      primaryContainer: ZingColors.darkSurfaceVariant,
-      onPrimaryContainer: ZingColors.primaryLight,
-      secondary: ZingColors.secondary,
-      onSecondary: Colors.white,
-      secondaryContainer: Color(0xFF4A0029),
-      onSecondaryContainer: Color(0xFFFFD8E8),
-      tertiary: ZingColors.accent,
-      onTertiary: Colors.white,
-      error: ZingColors.error,
-      onError: Colors.white,
-      surface: ZingColors.darkSurface,
-      onSurface: ZingColors.darkTextDark,
-      surfaceContainerHighest: ZingColors.darkSurfaceVariant,
-      onSurfaceVariant: ZingColors.darkTextMedium,
-      outline: ZingColors.darkDivider,
-      shadow: Colors.black38,
-    ),
-
-    appBarTheme: AppBarTheme(
-      backgroundColor: ZingColors.darkSurface,
-      foregroundColor: ZingColors.darkTextDark,
-      elevation: 0,
-      scrolledUnderElevation: 0.5,
-      centerTitle: true,
-      surfaceTintColor: Colors.transparent,
-      titleTextStyle: GoogleFonts.poppins(
-        fontSize: 18,
-        fontWeight: FontWeight.w600,
-        color: ZingColors.darkTextDark,
-        letterSpacing: 0.3,
-      ),
-      iconTheme: const IconThemeData(color: ZingColors.darkTextDark, size: 24),
-      toolbarHeight: 60,
-    ),
-
-    navigationBarTheme: NavigationBarThemeData(
-      height: 72,
-      backgroundColor: ZingColors.darkSurface,
-      surfaceTintColor: Colors.transparent,
-      elevation: 0,
-      indicatorColor: ZingColors.primaryLight.withOpacity(0.2),
-      labelTextStyle: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.selected)) {
-          return GoogleFonts.poppins(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: ZingColors.primaryLight,
-          );
-        }
-        return GoogleFonts.poppins(
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-          color: ZingColors.darkTextLight,
-        );
-      }),
-      iconTheme: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.selected)) {
-          return const IconThemeData(color: ZingColors.primaryLight, size: 24);
-        }
-        return const IconThemeData(color: ZingColors.darkTextLight, size: 24);
-      }),
-    ),
-
-    searchBarTheme: SearchBarThemeData(
-      backgroundColor: WidgetStateProperty.all(ZingColors.darkSurfaceVariant),
-      elevation: WidgetStateProperty.all(0),
-      hintStyle: WidgetStateProperty.all(
-        GoogleFonts.inter(color: ZingColors.darkTextLight, fontSize: 14),
-      ),
-      textStyle: WidgetStateProperty.all(
-        GoogleFonts.inter(color: ZingColors.darkTextDark, fontSize: 14),
-      ),
-      shape: WidgetStateProperty.all(
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      ),
-    ),
-
-    textTheme: TextTheme(
-      displayLarge: GoogleFonts.poppins(
-        color: ZingColors.darkTextDark, fontSize: 32, fontWeight: FontWeight.w700, letterSpacing: -0.5,
-      ),
-      displayMedium: GoogleFonts.poppins(
-        color: ZingColors.darkTextDark, fontSize: 26, fontWeight: FontWeight.w700,
-      ),
-      headlineLarge: GoogleFonts.poppins(
-        color: ZingColors.darkTextDark, fontSize: 22, fontWeight: FontWeight.w700,
-      ),
-      headlineMedium: GoogleFonts.poppins(
-        color: ZingColors.darkTextDark, fontSize: 20, fontWeight: FontWeight.w600,
-      ),
-      headlineSmall: GoogleFonts.poppins(
-        color: ZingColors.darkTextDark, fontSize: 18, fontWeight: FontWeight.w600,
-      ),
-      titleLarge: GoogleFonts.poppins(
-        color: ZingColors.darkTextDark, fontSize: 16, fontWeight: FontWeight.w600,
-      ),
-      titleMedium: GoogleFonts.poppins(
-        color: ZingColors.darkTextDark, fontSize: 14, fontWeight: FontWeight.w600,
-      ),
-      titleSmall: GoogleFonts.poppins(
-        color: ZingColors.darkTextMedium, fontSize: 12, fontWeight: FontWeight.w500,
-      ),
-      bodyLarge: GoogleFonts.inter(
-        color: ZingColors.darkTextDark, fontSize: 16, fontWeight: FontWeight.w400, height: 1.5,
-      ),
-      bodyMedium: GoogleFonts.inter(
-        color: ZingColors.darkTextMedium, fontSize: 14, fontWeight: FontWeight.w400, height: 1.5,
-      ),
-      bodySmall: GoogleFonts.inter(
-        color: ZingColors.darkTextLight, fontSize: 12, fontWeight: FontWeight.w400, height: 1.4,
-      ),
-      labelLarge: GoogleFonts.poppins(
-        color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: 0.2,
-      ),
-      labelMedium: GoogleFonts.poppins(
-        color: ZingColors.darkTextMedium, fontSize: 12, fontWeight: FontWeight.w500,
-      ),
-      labelSmall: GoogleFonts.poppins(
-        color: ZingColors.darkTextLight, fontSize: 10, fontWeight: FontWeight.w500, letterSpacing: 0.4,
-      ),
-    ),
-
-    elevatedButtonTheme: ElevatedButtonThemeData(
-      style: ElevatedButton.styleFrom(
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: tint,
         foregroundColor: Colors.white,
-        backgroundColor: ZingColors.primaryLight,
+        elevation: 2,
+        highlightElevation: 2,
+        shape: const StadiumBorder(),
+      ),
+
+      chipTheme: ChipThemeData(
+        backgroundColor: fill,
+        selectedColor: tint,
+        labelStyle: ZingType.style(14, weight: FontWeight.w500, color: label),
+        secondaryLabelStyle: ZingType.style(14, weight: FontWeight.w600, color: Colors.white),
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
+        elevation: 0,
+        pressElevation: 0,
+        side: BorderSide.none,
+        shape: const StadiumBorder(),
+      ),
+
+      cardTheme: CardThemeData(
+        color: surface,
         shadowColor: Colors.transparent,
         elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 28),
-        textStyle: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
-      ).copyWith(
-        overlayColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.pressed)) return Colors.white.withOpacity(0.15);
-          return null;
-        }),
+        margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(ZingRadius.lg)),
       ),
-    ),
 
-    outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(
-        foregroundColor: ZingColors.primaryLight,
-        side: const BorderSide(color: ZingColors.primaryLight, width: 1.5),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 28),
-        textStyle: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
+      dividerTheme: DividerThemeData(color: separator, thickness: 0.5, space: 0.5),
+
+      dialogTheme: DialogThemeData(
+        backgroundColor: surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(ZingRadius.lg)),
+        titleTextStyle: ZingType.headline(label),
+        contentTextStyle: ZingType.subhead(label2),
       ),
-    ),
 
-    inputDecorationTheme: InputDecorationTheme(
-      filled: true,
-      fillColor: ZingColors.darkSurfaceVariant,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: ZingColors.darkDivider, width: 1),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: surface,
+        modalBackgroundColor: surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        modalElevation: 0,
+        modalBarrierColor: Colors.black.withValues(alpha: 0.35),
+        dragHandleColor: separator,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(ZingRadius.xl)),
+        ),
+        clipBehavior: Clip.antiAlias,
       ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: ZingColors.darkDivider, width: 1),
+
+      popupMenuTheme: PopupMenuThemeData(
+        color: surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 12,
+        shadowColor: Colors.black.withValues(alpha: 0.2),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(ZingRadius.md)),
+        textStyle: ZingType.body(label),
       ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: ZingColors.primaryLight, width: 2),
+
+      bottomNavigationBarTheme: BottomNavigationBarThemeData(
+        backgroundColor: surface,
+        selectedItemColor: tint,
+        unselectedItemColor: label3,
+        elevation: 0,
+        type: BottomNavigationBarType.fixed,
       ),
-      errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: ZingColors.error, width: 1.5),
+
+      tabBarTheme: TabBarThemeData(
+        labelColor: tint,
+        unselectedLabelColor: label3,
+        indicatorColor: tint,
+        indicatorSize: TabBarIndicatorSize.label,
+        dividerColor: separator.withValues(alpha: 0.6),
+        dividerHeight: 0.5,
+        labelStyle: ZingType.style(15, weight: FontWeight.w600),
+        unselectedLabelStyle: ZingType.style(15, weight: FontWeight.w500),
+        overlayColor: WidgetStateProperty.all(Colors.transparent),
       ),
-      hintStyle: GoogleFonts.inter(color: ZingColors.darkTextLight, fontSize: 14),
-      labelStyle: GoogleFonts.inter(color: ZingColors.darkTextMedium, fontSize: 14),
-      prefixIconColor: ZingColors.darkTextMedium,
-      suffixIconColor: ZingColors.darkTextMedium,
-    ),
 
-    floatingActionButtonTheme: FloatingActionButtonThemeData(
-      backgroundColor: ZingColors.primaryLight,
-      foregroundColor: Colors.white,
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-    ),
-
-    chipTheme: ChipThemeData(
-      backgroundColor: ZingColors.darkSurfaceVariant,
-      selectedColor: ZingColors.primaryLight.withOpacity(0.2),
-      labelStyle: GoogleFonts.poppins(
-        color: ZingColors.darkTextMedium, fontSize: 12, fontWeight: FontWeight.w500,
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: dark ? ZingColors.darkSurfaceVariant : const Color(0xFF2C2C2E),
+        contentTextStyle: ZingType.subhead(Colors.white),
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(ZingRadius.md)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       ),
-      secondaryLabelStyle: GoogleFonts.poppins(
-        color: ZingColors.primaryLight, fontSize: 12, fontWeight: FontWeight.w600,
+
+      listTileTheme: ListTileThemeData(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+        iconColor: tint,
+        titleTextStyle: ZingType.body(label),
+        subtitleTextStyle: ZingType.footnote(label3),
       ),
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-      elevation: 0,
-      side: const BorderSide(color: ZingColors.darkDivider),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    ),
 
-    cardTheme: CardThemeData(
-      color: ZingColors.darkSurface,
-      shadowColor: Colors.black.withOpacity(0.3),
-      elevation: 0,
-      margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-        side: const BorderSide(color: ZingColors.darkDivider, width: 0.5),
+      progressIndicatorTheme: ProgressIndicatorThemeData(
+        color: tint,
+        linearTrackColor: fill,
+        circularTrackColor: Colors.transparent,
       ),
-    ),
 
-    dividerTheme: const DividerThemeData(
-      color: ZingColors.darkDivider,
-      thickness: 1,
-      space: 1,
-    ),
+      // iOS switch: green track, white thumb, no outline.
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.all(Colors.white),
+        trackColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? ZingColors.success : fill,
+        ),
+        trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
+        overlayColor: WidgetStateProperty.all(Colors.transparent),
+      ),
 
-    snackBarTheme: SnackBarThemeData(
-      behavior: SnackBarBehavior.floating,
-      backgroundColor: ZingColors.darkSurfaceVariant,
-      contentTextStyle: GoogleFonts.inter(color: ZingColors.darkTextDark, fontSize: 13),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-    ),
+      checkboxTheme: CheckboxThemeData(
+        fillColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? tint : Colors.transparent,
+        ),
+        checkColor: WidgetStateProperty.all(Colors.white),
+        side: BorderSide(color: label3, width: 1.5),
+        shape: const CircleBorder(),
+      ),
 
-    listTileTheme: ListTileThemeData(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      iconColor: ZingColors.primaryLight,
-    ),
+      radioTheme: RadioThemeData(
+        fillColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? tint : label3,
+        ),
+      ),
 
-    progressIndicatorTheme: const ProgressIndicatorThemeData(
-      color: ZingColors.primaryLight,
-    ),
-  );
+      sliderTheme: SliderThemeData(
+        activeTrackColor: tint,
+        inactiveTrackColor: fill,
+        thumbColor: Colors.white,
+        overlayColor: Colors.transparent,
+        trackHeight: 4,
+      ),
+
+      tooltipTheme: TooltipThemeData(
+        decoration: BoxDecoration(
+          color: const Color(0xFF2C2C2E),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        textStyle: ZingType.footnote(Colors.white),
+      ),
+    );
+  }
 }

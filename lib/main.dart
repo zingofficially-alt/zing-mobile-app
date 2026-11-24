@@ -1,11 +1,9 @@
-import 'dart:math' as math;
 import 'dart:io' show Platform;
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:logger/logger.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:zing/AdminPanal/AdminPanalDashBoard.dart';
@@ -20,15 +18,18 @@ import 'package:zing/screen/UserScreens/FavouriteStoreScreen.dart';
 import 'dart:async';
 import 'package:zing/screen/StartingScreens/onboardingScreen.dart';
 
-import 'Cart/CartProvider.dart';
-import 'config/env.dart';
-import 'Service/AdvertisementProvider.dart';
-import 'Service/RecommendationProvider.dart';
-import 'Service/ChatProvider.dart';
-import 'Service/NotificationProvider.dart';
-import 'Service/OfferProvider.dart';
-import 'Service/OrderProvider.dart';
-import 'Service/ThemeProvider.dart';
+import 'package:zing/Cart/CartProvider.dart';
+import 'package:zing/config/env.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:zing/Service/AdvertisementProvider.dart';
+import 'package:zing/Service/RecommendationProvider.dart';
+import 'package:zing/Service/ChatProvider.dart';
+import 'package:zing/Service/NotificationProvider.dart';
+import 'package:zing/Service/OfferProvider.dart';
+import 'package:zing/Service/OrderProvider.dart';
+import 'package:zing/Service/ThemeProvider.dart';
+import 'package:zing/Widgets/Shared/zing_motion.dart';
+import 'package:zing/screen/HelpSupportScreen.dart';
 
 Future<void> requestPermissions() async {
   try {
@@ -62,16 +63,6 @@ Future<void> requestPermissions() async {
 }
 
 void main() async {
-  FlutterError.onError = (FlutterErrorDetails details) {
-    final exception = details.exception.toString();
-    if (exception.contains('semantics') ||
-        exception.contains('parentDataDirty') ||
-        exception.contains('_needsLayout')) {
-      return;
-    }
-    FlutterError.presentError(details);
-  };
-
   WidgetsFlutterBinding.ensureInitialized();
 
   await SystemChrome.setPreferredOrientations([
@@ -88,7 +79,12 @@ void main() async {
     anonKey: Env.supabasePublishableKey,
   );
 
+
   await requestPermissions();
+
+  // First launch shows the onboarding once; afterwards go straight home.
+  final prefs = await SharedPreferences.getInstance();
+  final showOnboarding = !(prefs.getBool('onboarding_seen') ?? false);
 
   runApp(
     MultiProvider(
@@ -105,13 +101,14 @@ void main() async {
         ChangeNotifierProvider(create: (_) => RecommendationProvider()),
         ChangeNotifierProvider(create: (_) => NotificationProvider()..startListening()),
       ],
-      child: const Zing(),
+      child: Zing(showOnboarding: showOnboarding),
     ),
   );
 }
 
 class Zing extends StatelessWidget {
-  const Zing({super.key});
+  final bool showOnboarding;
+  const Zing({super.key, this.showOnboarding = false});
 
   @override
   Widget build(BuildContext context) {
@@ -121,44 +118,27 @@ class Zing extends StatelessWidget {
       theme: themeProvider.lightTheme,
       darkTheme: themeProvider.darkTheme,
       debugShowCheckedModeBanner: false,
-      initialRoute: '/home',
+      scrollBehavior: const ZingScrollBehavior(),
+      initialRoute: showOnboarding ? '/onboarding' : '/home',
       routes: {
-        '/auth': (_) => AuthWrapper(),
+        '/auth': (_) => const AuthWrapper(),
         '/splash': (_) => const SplashScreen(),
-        '/onboarding': (_) => OnboardingScreen(),
-        '/login': (_) => LoginScreen(),
-        '/createAccount': (_) => CreateAccountScreen(),
+        '/onboarding': (_) => const OnboardingScreen(),
+        '/login': (_) => const LoginScreen(),
+        '/createAccount': (_) => const CreateAccountScreen(),
         '/home': (_) => const MainShell(),
         '/storeManagement': (_) => const StoreManagementWidget(),
-        '/adminPanel': (_) => AdminPanelDashboard(),
+        '/adminPanel': (_) => const AdminPanelDashboard(),
         '/favorites': (_) => const FavouriteStoreScreen(),
-        '/help': (_) => const HelpSupportPlaceholderScreen(),
+        '/help': (_) => const HelpSupportScreen(),
       },
     );
   }
 }
 
-class HelpSupportPlaceholderScreen extends StatelessWidget {
-  const HelpSupportPlaceholderScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Help & Support')),
-      body: const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'Help & Support is coming soon.',
-            textAlign: TextAlign.center,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<AuthState>(
@@ -254,7 +234,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
           gradient: LinearGradient(
             colors: [
               ZingColors.primaryDark,
@@ -284,11 +264,11 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                         height: size.width * 0.35,
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.95),
+                          color: Colors.white.withValues(alpha: 0.95),
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.15),
+                              color: Colors.black.withValues(alpha: 0.15),
                               blurRadius: 20,
                               spreadRadius: 2,
                               offset: const Offset(0, 5),
@@ -315,7 +295,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                     opacity: _textOpacity.value,
                     child: Column(
                       children: [
-                        Text(
+                        const Text(
                           'ZING',
                           style: TextStyle(
                             fontSize: 44,
@@ -331,7 +311,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                             fontSize: 16,
                             fontWeight: FontWeight.w500,
                             letterSpacing: 4,
-                            color: Colors.white.withOpacity(0.9),
+                            color: Colors.white.withValues(alpha: 0.9),
                           ),
                         ),
                       ],
@@ -354,7 +334,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                           height: 4,
                           width: double.infinity,
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.15),
+                            color: Colors.white.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(2),
                           ),
                           child: Align(
@@ -363,7 +343,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                               widthFactor: _progressValue.value,
                               child: Container(
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.8),
+                                  color: Colors.white.withValues(alpha: 0.8),
                                   borderRadius: BorderRadius.circular(2),
                                 ),
                               ),

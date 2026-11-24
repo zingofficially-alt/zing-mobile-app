@@ -1,24 +1,28 @@
 import 'dart:async';
+
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:provider/provider.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:carousel_slider/carousel_slider.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:provider/provider.dart';
 
 import 'package:zing/Modal/CoustomUser.dart';
-import 'package:zing/Service/CoustomUserProvider.dart';
-import 'package:zing/Service/StoreProvider.dart';
-import 'package:zing/Service/AdvertisementProvider.dart';
-import 'package:zing/Service/OfferProvider.dart';
-import 'package:zing/Service/ThemeProvider.dart';
-import 'package:zing/Service/RecommendationProvider.dart';
-import 'package:zing/Service/NotificationProvider.dart';
-import 'package:zing/Widgets/Shared/zing_store_card.dart';
-import 'package:zing/Widgets/Shared/zing_section_header.dart';
-import 'package:zing/Widgets/Shared/zing_shimmer.dart';
-import 'package:zing/Widgets/Recommendations/RecommendedStoresRow.dart';
 import 'package:zing/screen/NotificationsScreen.dart';
+import 'package:zing/screen/SearchExploreScreen.dart';
+import 'package:zing/Service/AdvertisementProvider.dart';
+import 'package:zing/Service/CoustomUserProvider.dart';
+import 'package:zing/Service/NotificationProvider.dart';
+import 'package:zing/Service/OfferProvider.dart';
+import 'package:zing/Service/RecentStores.dart';
+import 'package:zing/Service/RecommendationProvider.dart';
+import 'package:zing/Service/StoreProvider.dart';
+import 'package:zing/Service/ThemeProvider.dart';
+import 'package:zing/Widgets/Recommendations/RecommendedStoresRow.dart';
+import 'package:zing/Widgets/Shared/zing_ios.dart';
+import 'package:zing/Widgets/Shared/zing_motion.dart';
+import 'package:zing/Widgets/Shared/zing_shimmer.dart';
+import 'package:zing/Widgets/Shared/zing_store_card.dart';
 
 class HomePageScreen extends StatefulWidget {
   const HomePageScreen({super.key});
@@ -27,87 +31,57 @@ class HomePageScreen extends StatefulWidget {
   State<HomePageScreen> createState() => _HomePageScreenState();
 }
 
-class _HomePageScreenState extends State<HomePageScreen> with TickerProviderStateMixin {
-  AnimationController? _loadingAnimationController;
-  AnimationController? _logoAnimationController;
-
+class _HomePageScreenState extends State<HomePageScreen> {
   String? _selectedCategory;
   Position? _currentPosition;
-  bool _isMounted = true;
-  bool _isInitialized = false;
+  bool _initialized = false;
 
-  Map<String, double> _storeRatings = {};
-
+  final Map<String, double> _storeRatings = {};
   final ScrollController _scrollController = ScrollController();
 
-  final List<_CategoryItem> _categories = [
-    _CategoryItem('Electronics', FontAwesomeIcons.laptop, const Color(0xFF5B7FFF), const Color(0xFFEBF0FF)),
-    _CategoryItem('Clothing', FontAwesomeIcons.tshirt, const Color(0xFFFF6B6B), const Color(0xFFFFECEE)),
-    _CategoryItem('Food', FontAwesomeIcons.utensils, const Color(0xFFFFAE33), const Color(0xFFFFF6E9)),
-    _CategoryItem('Sports', FontAwesomeIcons.basketballBall, const Color(0xFF43B97F), const Color(0xFFE6F8EF)),
-    _CategoryItem('Beauty', FontAwesomeIcons.sprayCan, const Color(0xFFD77FE3), const Color(0xFFF9EBFF)),
-    _CategoryItem('Education', FontAwesomeIcons.graduationCap, const Color(0xFF6C63FF), const Color(0xFFEBEAFF)),
-    _CategoryItem('Electrical', FontAwesomeIcons.bolt, const Color(0xFFFFA726), const Color(0xFFFFF3E0)),
-    _CategoryItem('Kids', FontAwesomeIcons.baby, const Color(0xFF4DB6AC), const Color(0xFFE0F2F1)),
+  static const List<_CategoryItem> _categories = [
+    _CategoryItem('Electronics', FontAwesomeIcons.laptop, Color(0xFF5856D6), Color(0xFF7D7AFF)),
+    _CategoryItem('Clothing', FontAwesomeIcons.shirt, Color(0xFFFF2D55), Color(0xFFFF6482)),
+    _CategoryItem('Food', FontAwesomeIcons.utensils, Color(0xFFFF9500), Color(0xFFFFB340)),
+    _CategoryItem('Sports', FontAwesomeIcons.basketball, Color(0xFF34C759), Color(0xFF5ADB7B)),
+    _CategoryItem('Beauty', FontAwesomeIcons.sprayCan, Color(0xFFAF52DE), Color(0xFFC77DFF)),
+    _CategoryItem('Education', FontAwesomeIcons.graduationCap, Color(0xFF007AFF), Color(0xFF409CFF)),
+    _CategoryItem('Electrical', FontAwesomeIcons.bolt, Color(0xFFFFCC00), Color(0xFFFFD60A)),
+    _CategoryItem('Kids', FontAwesomeIcons.baby, Color(0xFF32ADE6), Color(0xFF64D2FF)),
   ];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Future.delayed(const Duration(milliseconds: 400), () {
-        if (mounted && _isMounted) _initializeScreen();
-      });
-    });
-  }
-
-  void _initializeScreen() {
-    if (!_isMounted || !mounted || _isInitialized) return;
-
-    setState(() => _isInitialized = true);
-
-    _loadingAnimationController = AnimationController(
-      duration: const Duration(seconds: 2),
-      vsync: this,
-    )..repeat();
-
-    _logoAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 500),
-      vsync: this,
-    )..forward();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      setState(() => _initialized = true);
+      RecentStores.load();
       final recProvider = Provider.of<RecommendationProvider>(context, listen: false);
       recProvider.logEvent(eventType: 'home-page-view');
       recProvider.fetchRecommendations(placement: RecommendationProvider.homeRecommended);
-    });
-
-    Future.delayed(const Duration(milliseconds: 2000), () {
-      if (mounted && _isMounted) _checkAndGetLocation();
+      // Give the first frame room before asking for location.
+      Future.delayed(const Duration(milliseconds: 1200), () {
+        if (mounted) _checkAndGetLocation();
+      });
     });
   }
 
   @override
   void dispose() {
-    _isMounted = false;
-    _loadingAnimationController?.dispose();
-    _logoAnimationController?.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
+  // ------------------------------------------------------------ location
+
   Future<void> _checkAndGetLocation() async {
     try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) return;
-
-      LocationPermission permission = await Geolocator.checkPermission();
+      if (!await Geolocator.isLocationServiceEnabled()) return;
+      var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
-      if (permission == LocationPermission.deniedForever) return;
-
       if (permission == LocationPermission.whileInUse || permission == LocationPermission.always) {
         await _getCurrentLocation();
       }
@@ -118,476 +92,385 @@ class _HomePageScreenState extends State<HomePageScreen> with TickerProviderStat
 
   Future<void> _getCurrentLocation() async {
     try {
-      Position? lastPosition = await Geolocator.getLastKnownPosition();
-      if (lastPosition != null && _isMounted && mounted) {
-        setState(() => _currentPosition = lastPosition);
-      }
+      final last = await Geolocator.getLastKnownPosition();
+      if (last != null && mounted) setState(() => _currentPosition = last);
 
-      Position position = await Geolocator.getCurrentPosition(
+      final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 100),
       ).timeout(const Duration(seconds: 20), onTimeout: () {
         if (_currentPosition != null) return _currentPosition!;
         throw TimeoutException('Location request timed out');
       });
-
-      if (_isMounted && mounted) {
-        setState(() => _currentPosition = position);
-      }
+      if (mounted) setState(() => _currentPosition = position);
     } catch (e) {
       debugPrint('Error getting location: $e');
     }
   }
 
-  double? _calculateDistance(double storeLat, double storeLng) {
-    if (_currentPosition == null) return null;
+  double? _distanceTo(Store store) {
+    final here = _currentPosition;
+    if (here == null) return null;
     return Geolocator.distanceBetween(
-      _currentPosition!.latitude, _currentPosition!.longitude, storeLat, storeLng,
-    ) / 1000;
+          here.latitude, here.longitude, store.location.latitude, store.location.longitude) /
+        1000;
   }
 
   void _loadStoreRatings(List<Store> stores) {
-    for (var store in stores) {
-      if (!_storeRatings.containsKey(store.id)) {
-        store.getAverageRating().then((rating) {
-          if (_isMounted && mounted) {
-            setState(() => _storeRatings[store.id!] = rating);
-          }
-        });
-      }
+    for (final store in stores) {
+      final id = store.id;
+      if (id == null || _storeRatings.containsKey(id)) continue;
+      _storeRatings[id] = store.ratingAvg ?? 0; // placeholder until loaded
+      store.getAverageRating().then((rating) {
+        if (mounted) setState(() => _storeRatings[id] = rating);
+      });
     }
   }
+
+  String _greeting(CustomUser? user) {
+    final hour = DateTime.now().hour;
+    final part = hour < 12 ? 'Good morning' : (hour < 17 ? 'Good afternoon' : 'Good evening');
+    final first = user?.name.trim().split(' ').first ?? '';
+    return first.isEmpty ? part : '$part, $first';
+  }
+
+  // ---------------------------------------------------------------- build
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
     final storeProvider = Provider.of<StoreProvider>(context);
-    final userProvider = Provider.of<CustomUserProvider>(context);
-    final screenSize = MediaQuery.of(context).size;
+    final user = Provider.of<CustomUserProvider>(context).user;
 
-    if (!_isInitialized) {
-      return Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(color: cs.primary),
-        ),
-      );
+    final filtered = storeProvider.activeStores
+        .where((s) => _selectedCategory == null || s.category == _selectedCategory)
+        .toList();
+    _loadStoreRatings(filtered);
+
+    final nearby = <Store>[];
+    final others = <Store>[];
+    for (final store in filtered) {
+      final d = _distanceTo(store);
+      (d != null && d <= 5 ? nearby : others).add(store);
     }
+    nearby.sort((a, b) => _distanceTo(a)!.compareTo(_distanceTo(b)!));
+    others.sort((a, b) =>
+        (_distanceTo(a) ?? double.infinity).compareTo(_distanceTo(b) ?? double.infinity));
+
+    final loading = !_initialized || storeProvider.isLoading;
 
     return Scaffold(
-      body: FutureBuilder<CustomUser?>(
-        future: userProvider.fetchUserDetails(),
-        builder: (context, snapshot) {
-          final user = snapshot.data;
-          return NestedScrollView(
-            controller: _scrollController,
-            headerSliverBuilder: (context, innerBoxIsScrolled) {
-              return [_buildAppBar(screenSize, user, theme)];
+      body: CustomScrollView(
+        controller: _scrollController,
+        slivers: [
+          _buildNavBar(user),
+          CupertinoSliverRefreshControl(
+            onRefresh: () async {
+              await storeProvider.fetchStores();
+              _storeRatings.clear();
             },
-            body: storeProvider.isLoading
-                ? _buildShimmerLoading(screenSize, theme)
-                : _buildHomeContent(storeProvider, user, screenSize, theme),
-          );
-        },
-      ),
-    );
-  }
-
-  // Clean white app bar with ZING logo left, notification bell right
-  SliverAppBar _buildAppBar(Size screenSize, CustomUser? user, ThemeData theme) {
-    final cs = theme.colorScheme;
-
-    return SliverAppBar(
-      expandedHeight: 120,
-      floating: true,
-      pinned: true,
-      snap: false,
-      elevation: 0,
-      scrolledUnderElevation: 0.5,
-      backgroundColor: cs.surface,
-      surfaceTintColor: Colors.transparent,
-      automaticallyImplyLeading: false,
-      flexibleSpace: FlexibleSpaceBar(
-        background: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(ZingSpacing.lg, ZingSpacing.sm, ZingSpacing.lg, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Logo row
-                Row(
-                  children: [
-                    Image.asset('assets/images/zing.png', height: 28, color: cs.primary),
-                    const SizedBox(width: 8),
-                    Text('ZING', style: theme.textTheme.headlineMedium?.copyWith(
-                      letterSpacing: 1.5,
-                      fontWeight: FontWeight.w800,
-                      color: cs.primary,
-                    )),
-                    const Spacer(),
-                    // Notification bell
-                    Consumer<NotificationProvider>(
-                      builder: (context, notifProvider, _) {
-                        return IconButton(
-                          onPressed: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const NotificationsScreen()),
-                          ),
-                          icon: Badge(
-                            isLabelVisible: notifProvider.unreadCount > 0,
-                            label: Text('${notifProvider.unreadCount}'),
-                            backgroundColor: cs.secondary,
-                            child: Icon(Icons.notifications_outlined, color: cs.onSurface),
-                          ),
-                        );
-                      },
-                    ),
-                    // Profile avatar
-                    if (user != null)
-                      CircleAvatar(
-                        radius: 18,
-                        backgroundColor: cs.surfaceContainerHighest,
-                        backgroundImage: user.profileImageUrl.isNotEmpty
-                            ? NetworkImage(user.profileImageUrl)
-                            : null,
-                        child: user.profileImageUrl.isEmpty
-                            ? Text(
-                                user.name.isNotEmpty ? user.name[0].toUpperCase() : '?',
-                                style: theme.textTheme.titleSmall?.copyWith(
-                                  color: cs.primary, fontWeight: FontWeight.w700),
-                              )
-                            : null,
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                // Welcome text
-                Text(
-                  'Welcome${user?.name != null && user!.name.isNotEmpty ? ", ${user.name.split(' ')[0]}" : ""}',
-                  style: theme.textTheme.headlineSmall,
-                ),
-              ],
+          ),
+          SliverToBoxAdapter(child: _buildGreeting(user)),
+          SliverToBoxAdapter(
+            child: ZingSearchField(
+              placeholder: 'Stores, products, categories',
+              readOnly: true,
+              onTap: () => Navigator.of(context).push(zingRoute(const SearchExploreScreen(autofocus: true))),
             ),
           ),
-        ),
-        titlePadding: EdgeInsets.zero,
-      ),
-    );
-  }
-
-  Widget _buildShimmerLoading(Size screenSize, ThemeData theme) {
-    return CustomScrollView(
-      physics: const BouncingScrollPhysics(),
-      slivers: [
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.only(top: ZingSpacing.md, bottom: ZingSpacing.lg),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: ZingSpacing.lg),
-                  child: ZingShimmer.box(height: screenSize.height * 0.2, borderRadius: 20),
-                ),
-                const SizedBox(height: ZingSpacing.xl),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: ZingSpacing.lg),
-                  child: ZingShimmer.box(width: screenSize.width * 0.4, height: 24),
-                ),
-                const SizedBox(height: ZingSpacing.md),
-                SizedBox(
-                  height: 110,
+          if (loading)
+            SliverToBoxAdapter(child: _buildSkeleton())
+          else ...[
+            SliverToBoxAdapter(child: _buildOffers()),
+            const SliverToBoxAdapter(child: ZingSectionTitle(title: 'Categories')),
+            SliverToBoxAdapter(child: _buildCategories()),
+            SliverToBoxAdapter(child: _buildRecentlyViewed(storeProvider.activeStores, user)),
+            SliverToBoxAdapter(
+              child: RecommendedStoresRow(
+                placement: RecommendationProvider.homeRecommended,
+                sectionTitle: 'Picked for You',
+                user: user,
+              ),
+            ),
+            if (nearby.isNotEmpty) ...[
+              ZingSectionTitle(
+                title: 'Near You',
+                actionLabel: '${nearby.length} stores',
+              ).asSliver(),
+              SliverToBoxAdapter(
+                child: SizedBox(
+                  height: 214,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    itemCount: 6,
-                    itemBuilder: (_, __) => Padding(
-                      padding: const EdgeInsets.only(right: 16),
-                      child: Column(
-                        children: [
-                          ZingShimmer.circle(size: 70),
-                          const SizedBox(height: 8),
-                          ZingShimmer.box(width: 60, height: 12),
-                        ],
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    itemCount: nearby.length,
+                    itemBuilder: (context, i) => ZingReveal(
+                      axis: Axis.horizontal,
+                      delay: Duration(milliseconds: 50 * (i % 4)),
+                      child: ZingStoreCard(
+                        store: nearby[i],
+                        user: user,
+                        distance: _distanceTo(nearby[i]),
+                        rating: _storeRatings[nearby[i].id] ?? 0,
                       ),
                     ),
                   ),
                 ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildHomeContent(StoreProvider storeProvider, CustomUser? user, Size screenSize, ThemeData theme) {
-    final cs = theme.colorScheme;
-
-    List<Store> filteredStores = storeProvider.stores.where((store) {
-      return _selectedCategory == null || store.category == _selectedCategory;
-    }).toList();
-
-    _loadStoreRatings(filteredStores);
-
-    List<Store> nearbyStores = [];
-    List<Store> otherStores = [];
-
-    for (var store in filteredStores) {
-      final distance = _calculateDistance(store.location.latitude, store.location.longitude);
-      if (distance != null && distance <= 5) {
-        nearbyStores.add(store);
-      } else {
-        otherStores.add(store);
-      }
-    }
-
-    otherStores.sort((a, b) {
-      final dA = _calculateDistance(a.location.latitude, a.location.longitude) ?? double.infinity;
-      final dB = _calculateDistance(b.location.latitude, b.location.longitude) ?? double.infinity;
-      return dA.compareTo(dB);
-    });
-
-    return RefreshIndicator(
-      onRefresh: () async {
-        await storeProvider.fetchStores();
-        return Future.delayed(const Duration(milliseconds: 300));
-      },
-      color: cs.primary,
-      child: CustomScrollView(
-        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-        slivers: [
-          const SliverToBoxAdapter(child: SizedBox(height: ZingSpacing.md)),
-          // Offer carousel
-          SliverToBoxAdapter(child: _buildOfferCarousel(screenSize, theme)),
-          // Categories
-          SliverToBoxAdapter(
-            child: ZingSectionHeader(
-              title: 'Categories',
-              actionText: _selectedCategory != null ? 'Clear' : null,
-              onAction: () => setState(() => _selectedCategory = null),
-            ),
-          ),
-          SliverToBoxAdapter(child: _buildCategorySelector(theme)),
-          // Recommendations
-          SliverToBoxAdapter(
-            child: RecommendedStoresRow(
-              placement: RecommendationProvider.homeRecommended,
-              sectionTitle: 'Recommended for You',
-              user: user,
-            ),
-          ),
-          // Nearby stores
-          if (nearbyStores.isNotEmpty) ...[
-            SliverToBoxAdapter(
-              child: ZingSectionHeader(
-                title: 'Nearby Stores',
-                icon: Icons.location_on_rounded,
-                iconColor: cs.primary,
               ),
-            ),
-            SliverToBoxAdapter(
-              child: SizedBox(
-                height: 260,
-                child: _buildStoresList(nearbyStores, user),
+            ],
+            SliverToBoxAdapter(child: _buildAds()),
+            if (others.isNotEmpty) ...[
+              ZingSectionTitle(
+                title: _selectedCategory ?? (nearby.isEmpty ? 'All Stores' : 'More to Explore'),
+              ).asSliver(),
+              SliverList.builder(
+                itemCount: others.length,
+                itemBuilder: (context, i) => ZingReveal(
+                  child: ZingStoreCard(
+                    wide: true,
+                    store: others[i],
+                    user: user,
+                    distance: _distanceTo(others[i]),
+                    rating: _storeRatings[others[i].id] ?? 0,
+                  ),
+                ),
               ),
-            ),
+            ],
+            if (filtered.isEmpty) SliverToBoxAdapter(child: _buildNoStores()),
           ],
-          // All stores
-          if (otherStores.isNotEmpty) ...[
-            SliverToBoxAdapter(
-              child: ZingSectionHeader(
-                title: 'All Stores',
-                icon: Icons.storefront_rounded,
-                iconColor: cs.secondary,
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: SizedBox(
-                height: 260,
-                child: _buildStoresList(otherStores, user),
-              ),
-            ),
-          ],
-          // Advertisements
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.only(top: ZingSpacing.xl, bottom: ZingSpacing.md),
-              child: _buildAdvertisementSection(screenSize, theme),
-            ),
-          ),
-          const SliverToBoxAdapter(child: SizedBox(height: 24)),
+          SliverToBoxAdapter(child: SizedBox(height: MediaQuery.paddingOf(context).bottom + 90)),
         ],
       ),
     );
   }
 
-  Widget _buildOfferCarousel(Size screenSize, ThemeData theme) {
+  Widget _buildNavBar(CustomUser? user) {
+    final theme = Theme.of(context);
     final cs = theme.colorScheme;
-
-    return Consumer<OfferProvider>(
-      builder: (context, offerProvider, _) {
-        if (offerProvider.isLoading) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: ZingSpacing.lg),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ZingShimmer.box(width: 150, height: 24),
-                const SizedBox(height: ZingSpacing.md),
-                ZingShimmer.box(height: screenSize.height * 0.2, borderRadius: 20),
-              ],
+    return CupertinoSliverNavigationBar(
+      largeTitle: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Image.asset('assets/images/zing.png', height: 28, color: cs.primary),
+          const SizedBox(width: 8),
+          const Text('ZING'),
+        ],
+      ),
+      middle: const Text('ZING'),
+      alwaysShowMiddle: false,
+      automaticallyImplyLeading: false,
+      backgroundColor: theme.scaffoldBackgroundColor.withValues(alpha: 0.82),
+      border: null,
+      stretch: true,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Consumer<NotificationProvider>(
+            builder: (context, n, _) => ZingBarButton(
+              icon: CupertinoIcons.bell,
+              tooltip: 'Notifications',
+              badge: ZingBadge(count: n.unreadCount),
+              onPressed: () => Navigator.of(context).push(zingRoute(const NotificationsScreen())),
             ),
+          ),
+          if (user != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: CircleAvatar(
+                radius: 15,
+                backgroundColor: cs.primary.withValues(alpha: 0.14),
+                backgroundImage: user.profileImageUrl.isNotEmpty
+                    ? CachedNetworkImageProvider(user.profileImageUrl)
+                    : null,
+                child: user.profileImageUrl.isEmpty
+                    ? Text(
+                        user.name.isNotEmpty ? user.name[0].toUpperCase() : '?',
+                        style: ZingType.style(14, weight: FontWeight.w700, color: cs.primary),
+                      )
+                    : null,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGreeting(CustomUser? user) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 2, 20, 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(_greeting(user), style: ZingType.subhead(cs.onSurfaceVariant)),
+          ),
+          AnimatedSwitcher(
+            duration: ZingMotion.medium,
+            child: _currentPosition == null
+                ? const SizedBox.shrink()
+                : Row(
+                    key: const ValueKey('loc'),
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(CupertinoIcons.location_fill, size: 13, color: cs.primary),
+                      const SizedBox(width: 4),
+                      Text('Near you', style: ZingType.footnote(cs.primary)),
+                    ],
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOffers() {
+    final cs = Theme.of(context).colorScheme;
+    return Consumer<OfferProvider>(
+      builder: (context, offers, _) {
+        if (offers.isLoading) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+            child: ZingShimmer.box(height: 180, borderRadius: ZingRadius.xl),
           );
         }
-
-        if (offerProvider.offers.isEmpty) return const SizedBox.shrink();
-
+        if (offers.offers.isEmpty) return const SizedBox.shrink();
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: ZingSpacing.lg),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ZingSectionHeader(
-                title: 'Special Offers',
-                icon: Icons.local_offer_rounded,
-                iconColor: cs.secondary,
-                padding: EdgeInsets.zero,
-              ),
-              const SizedBox(height: ZingSpacing.md),
-              RepaintBoundary(
-                child: CarouselSlider.builder(
-                  itemCount: offerProvider.offers.length,
-                  itemBuilder: (context, index, _) {
-                    final offer = offerProvider.offers[index];
-                    return Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: ZingShadows.soft,
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(20),
-                        child: Stack(
-                          children: [
-                            Positioned.fill(
-                              child: Image.network(
-                                offer.imageUrl,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Container(
-                                  color: cs.surfaceContainerHighest,
-                                  child: Icon(Icons.error_outline, color: cs.error, size: 32),
-                                ),
-                              ),
-                            ),
-                            Positioned.fill(
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: [Colors.transparent, Colors.black.withOpacity(0.6)],
-                                    stops: const [0.6, 1.0],
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Positioned(
-                              top: 16, left: 16,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                decoration: BoxDecoration(
-                                  color: cs.secondary,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  'SPECIAL OFFER',
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: Colors.white, fontWeight: FontWeight.w700, letterSpacing: 0.5),
-                                ),
-                              ),
-                            ),
-                          ],
+          padding: const EdgeInsets.only(top: 8),
+          child: ZingDepthCarousel(
+            height: 184,
+            itemCount: offers.offers.length,
+            itemBuilder: (context, i) {
+              final offer = offers.offers[i];
+              return Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(ZingRadius.xl - 4),
+                  boxShadow: ZingShadows.card,
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    CachedNetworkImage(
+                      imageUrl: offer.imageUrl,
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) => ColoredBox(color: cs.surfaceContainerHighest),
+                      errorWidget: (_, __, ___) => Container(
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [ZingColors.primary, ZingColors.secondary],
+                          ),
                         ),
                       ),
-                    );
-                  },
-                  options: CarouselOptions(
-                    height: screenSize.height * 0.2,
-                    viewportFraction: 1.0,
-                    autoPlay: true,
-                    autoPlayInterval: const Duration(seconds: 5),
-                    autoPlayAnimationDuration: const Duration(milliseconds: 800),
-                    autoPlayCurve: Curves.fastOutSlowIn,
-                    pauseAutoPlayOnTouch: true,
-                  ),
+                    ),
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Color(0x00000000), Color(0x99000000)],
+                          stops: [0.45, 1],
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: 16,
+                      top: 14,
+                      child: ZingGlass(
+                        borderRadius: BorderRadius.circular(100),
+                        color: ZingColors.secondary,
+                        opacity: 0.9,
+                        blur: 8,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          child: Text('OFFER',
+                              style: ZingType.style(11,
+                                  weight: FontWeight.w700, color: Colors.white, letterSpacing: 0.8)),
+                        ),
+                      ),
+                    ),
+                    if (offer.text.isNotEmpty)
+                      Positioned(
+                        left: 16,
+                        right: 16,
+                        bottom: 14,
+                        child: Text(
+                          offer.text,
+                          style: ZingType.title3(Colors.white),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
                 ),
-              ),
-            ],
+              );
+            },
           ),
         );
       },
     );
   }
 
-  Widget _buildCategorySelector(ThemeData theme) {
-    final cs = theme.colorScheme;
+  Widget _buildCategories() {
+    final cs = Theme.of(context).colorScheme;
     return SizedBox(
-      height: 110,
+      height: 104,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 20),
+        padding: const EdgeInsets.symmetric(horizontal: 14),
         itemCount: _categories.length,
-        itemBuilder: (context, index) {
-          final category = _categories[index];
-          final isSelected = _selectedCategory == category.name;
-
-          return GestureDetector(
-            onTap: () {
-              HapticFeedback.lightImpact();
-              setState(() => _selectedCategory = isSelected ? null : category.name);
-            },
-            child: Container(
-              width: 85,
-              margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 70,
-                    height: 70,
-                    decoration: BoxDecoration(
-                      color: isSelected ? category.color : category.bgColor,
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: isSelected
-                          ? [BoxShadow(color: category.color.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4))]
-                          : null,
-                    ),
-                    child: Center(
-                      child: FaIcon(category.icon, color: isSelected ? Colors.white : category.color, size: 26),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    category.name,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                      color: isSelected ? category.color : cs.onSurface,
-                    ),
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  if (isSelected)
-                    Container(
-                      width: 16, height: 2,
-                      decoration: BoxDecoration(
-                        color: category.color,
-                        borderRadius: BorderRadius.circular(1),
+        itemBuilder: (context, i) {
+          final c = _categories[i];
+          final selected = _selectedCategory == c.name;
+          final dimmed = _selectedCategory != null && !selected;
+          return ZingReveal(
+            axis: Axis.horizontal,
+            offset: 18,
+            delay: Duration(milliseconds: 40 * i),
+            child: ZingPressable(
+              pressedScale: 0.9,
+              onTap: () => setState(() => _selectedCategory = selected ? null : c.name),
+              child: AnimatedOpacity(
+                duration: ZingMotion.medium,
+                opacity: dimmed ? 0.45 : 1,
+                child: SizedBox(
+                  width: 78,
+                  child: Column(
+                    children: [
+                      AnimatedContainer(
+                        duration: ZingMotion.medium,
+                        curve: ZingMotion.emphasized,
+                        width: 62,
+                        height: 62,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [c.light, c.color],
+                          ),
+                          borderRadius: BorderRadius.circular(18),
+                          border: selected
+                              ? Border.all(color: cs.surface, width: 3)
+                              : null,
+                          boxShadow: [
+                            BoxShadow(
+                              color: c.color.withValues(alpha: selected ? 0.55 : 0.28),
+                              blurRadius: selected ? 16 : 10,
+                              offset: const Offset(0, 6),
+                            ),
+                          ],
+                        ),
+                        child: Center(child: FaIcon(c.icon, color: Colors.white, size: 24)),
                       ),
-                    ),
-                ],
+                      const SizedBox(height: 8),
+                      Text(
+                        c.name,
+                        style: ZingType.style(12,
+                            weight: selected ? FontWeight.w700 : FontWeight.w500,
+                            color: selected ? c.color : cs.onSurface),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           );
@@ -596,99 +479,167 @@ class _HomePageScreenState extends State<HomePageScreen> with TickerProviderStat
     );
   }
 
-  Widget _buildStoresList(List<Store> stores, CustomUser? user) {
-    return ListView.builder(
-      scrollDirection: Axis.horizontal,
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      itemCount: stores.length,
-      itemBuilder: (context, index) {
-        final store = stores[index];
-        final distance = _calculateDistance(store.location.latitude, store.location.longitude);
-        final rating = _storeRatings[store.id] ?? 0.0;
-
-        return ZingStoreCard(
-          store: store,
-          user: user,
-          distance: distance,
-          rating: rating,
+  /// Small round shortcuts back to the stores this device opened last.
+  Widget _buildRecentlyViewed(List<Store> stores, CustomUser? user) {
+    final cs = Theme.of(context).colorScheme;
+    return ValueListenableBuilder<List<String>>(
+      valueListenable: RecentStores.ids,
+      builder: (context, ids, _) {
+        final recent = <Store>[
+          for (final id in ids)
+            for (final s in stores)
+              if (s.id == id) s,
+        ];
+        if (recent.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ZingSectionTitle(
+              title: 'Recently Viewed',
+              actionLabel: 'Clear',
+              onAction: RecentStores.clear,
+            ),
+            SizedBox(
+              height: 100,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                itemCount: recent.length,
+                itemBuilder: (context, i) {
+                  final store = recent[i];
+                  return ZingPressable(
+                    pressedScale: 0.92,
+                    onTap: () => openStore(context, store, user: user),
+                    child: SizedBox(
+                      width: 80,
+                      child: Column(
+                        children: [
+                          Container(
+                            width: 62,
+                            height: 62,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: cs.surface,
+                              border: Border.all(color: cs.surface, width: 3),
+                              boxShadow: ZingShadows.soft,
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: store.imageUrl.isEmpty
+                                ? Container(
+                                    color: cs.primary.withValues(alpha: 0.12),
+                                    alignment: Alignment.center,
+                                    child: Text(
+                                      store.name.isNotEmpty ? store.name[0].toUpperCase() : '?',
+                                      style: ZingType.title3(cs.primary),
+                                    ),
+                                  )
+                                : CachedNetworkImage(imageUrl: store.imageUrl, fit: BoxFit.cover),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            store.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: ZingType.style(12, weight: FontWeight.w500, color: cs.onSurface),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         );
       },
     );
   }
 
-  Widget _buildAdvertisementSection(Size screenSize, ThemeData theme) {
-    final cs = theme.colorScheme;
-
+  Widget _buildAds() {
+    final cs = Theme.of(context).colorScheme;
     return Consumer<AdvertisementProvider>(
-      builder: (context, adProvider, _) {
-        if (adProvider.isLoading) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: ZingSpacing.lg),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ZingShimmer.box(width: 150, height: 24),
-                const SizedBox(height: ZingSpacing.md),
-                ZingShimmer.box(height: screenSize.height * 0.15, borderRadius: 20),
-              ],
-            ),
-          );
-        }
-
-        if (adProvider.advertisements.isEmpty) return const SizedBox.shrink();
-
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: ZingSpacing.lg),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ZingSectionHeader(
-                title: 'Featured Ads',
-                icon: Icons.campaign_rounded,
-                iconColor: cs.tertiary,
-                padding: EdgeInsets.zero,
-              ),
-              const SizedBox(height: ZingSpacing.md),
-              RepaintBoundary(
-                child: CarouselSlider.builder(
-                  itemCount: adProvider.advertisements.length,
-                  options: CarouselOptions(
-                    height: screenSize.height * 0.15,
-                    viewportFraction: 1.0,
-                    autoPlay: true,
-                    autoPlayInterval: const Duration(seconds: 7),
-                    autoPlayAnimationDuration: const Duration(milliseconds: 800),
-                    enableInfiniteScroll: true,
-                  ),
-                  itemBuilder: (context, index, _) {
-                    final ad = adProvider.advertisements[index];
-                    return Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: ZingShadows.soft,
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(20),
-                        child: Image.network(
-                          ad.imageUrl,
-                          fit: BoxFit.cover,
-                          width: double.infinity,
-                          errorBuilder: (_, __, ___) => Container(
-                            color: cs.surfaceContainerHighest,
-                            child: Icon(Icons.error_outline, color: cs.error, size: 32),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
+      builder: (context, ads, _) {
+        if (ads.isLoading || ads.advertisements.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const ZingSectionTitle(title: 'Featured'),
+            ZingDepthCarousel(
+              height: 140,
+              viewportFraction: 0.9,
+              autoPlay: const Duration(seconds: 7),
+              itemCount: ads.advertisements.length,
+              itemBuilder: (context, i) => Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(ZingRadius.lg),
+                  boxShadow: ZingShadows.soft,
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: CachedNetworkImage(
+                  imageUrl: ads.advertisements[i].imageUrl,
+                  fit: BoxFit.cover,
+                  placeholder: (_, __) => ColoredBox(color: cs.surfaceContainerHighest),
+                  errorWidget: (_, __, ___) => ColoredBox(color: cs.surfaceContainerHighest),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         );
       },
+    );
+  }
+
+  Widget _buildNoStores() {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(32, 40, 32, 0),
+      child: Column(
+        children: [
+          Icon(CupertinoIcons.bag, size: 44, color: cs.onSurfaceVariant.withValues(alpha: 0.5)),
+          const SizedBox(height: 12),
+          Text(
+            _selectedCategory == null ? 'No stores yet' : 'No $_selectedCategory stores yet',
+            style: ZingType.headline(cs.onSurface),
+          ),
+          const SizedBox(height: 6),
+          Text('Check back soon — new local stores join every week.',
+              style: ZingType.subhead(cs.onSurfaceVariant), textAlign: TextAlign.center),
+          if (_selectedCategory != null)
+            CupertinoButton(
+              onPressed: () => setState(() => _selectedCategory = null),
+              child: Text('Show all categories', style: ZingType.body(cs.primary)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSkeleton() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ZingShimmer.box(height: 180, borderRadius: ZingRadius.xl),
+          const SizedBox(height: 30),
+          ZingShimmer.box(width: 140, height: 22),
+          const SizedBox(height: 16),
+          Row(
+            children: List.generate(
+              4,
+              (_) => Padding(
+                padding: const EdgeInsets.only(right: 16),
+                child: ZingShimmer.box(width: 62, height: 62, borderRadius: 18),
+              ),
+            ),
+          ),
+          const SizedBox(height: 30),
+          ZingShimmer.box(width: 160, height: 22),
+          const SizedBox(height: 16),
+          ZingShimmer.box(height: 220, borderRadius: ZingRadius.xl),
+        ],
+      ),
     );
   }
 }
@@ -697,6 +648,10 @@ class _CategoryItem {
   final String name;
   final FaIconData icon;
   final Color color;
-  final Color bgColor;
-  const _CategoryItem(this.name, this.icon, this.color, this.bgColor);
+  final Color light;
+  const _CategoryItem(this.name, this.icon, this.color, this.light);
+}
+
+extension on Widget {
+  Widget asSliver() => SliverToBoxAdapter(child: this);
 }

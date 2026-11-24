@@ -1,8 +1,11 @@
+import 'package:zing/config/business_config.dart';
 import 'package:flutter/material.dart';
 import 'package:animate_do/animate_do.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class CompanyNavDrawer extends StatelessWidget {
+  const CompanyNavDrawer({super.key});
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -18,7 +21,7 @@ class CompanyNavDrawer extends StatelessWidget {
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
-                borderRadius: BorderRadius.only(
+                borderRadius: const BorderRadius.only(
                   bottomLeft: Radius.circular(20),
                   bottomRight: Radius.circular(20),
                 ),
@@ -32,23 +35,23 @@ class CompanyNavDrawer extends StatelessWidget {
                     width: 70,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      image: DecorationImage(
+                      image: const DecorationImage(
                         image: AssetImage('assets/images/zing.png'), // Your company logo path
                         fit: BoxFit.cover,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
+                          color: Colors.black.withValues(alpha: 0.1),
                           spreadRadius: 2,
                           blurRadius: 6,
-                          offset: Offset(0, 3),
+                          offset: const Offset(0, 3),
                         ),
                       ],
                     ),
                   ),
-                  SizedBox(height: 15),
+                  const SizedBox(height: 15),
                   // Company Name with increased font size
-                  Text(
+                  const Text(
                     'ZING',
                     style: TextStyle(
                       fontSize: 24,
@@ -66,7 +69,7 @@ class CompanyNavDrawer extends StatelessWidget {
               delay: 300,
               icon: Icons.phone,
               title: 'Phone: +94 76 673 789',
-              onTap: () => _launchURL('tel:+94766673789'),
+              onTap: () => _launchURL('tel:${BusinessConfig.companyPhoneDial}'),
             ),
 
 
@@ -110,7 +113,7 @@ class CompanyNavDrawer extends StatelessWidget {
         ),
         title: Text(
           title,
-          style: TextStyle(
+          style: const TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w600,
             letterSpacing: 0.5,
@@ -122,14 +125,15 @@ class CompanyNavDrawer extends StatelessWidget {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
         ),
-        contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       ),
     );
   }
 
   void _launchURL(String url) async {
-    if (await canLaunch(url)) {
-      await launch(url);
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
     } else {
       throw 'Could not launch $url';
     }

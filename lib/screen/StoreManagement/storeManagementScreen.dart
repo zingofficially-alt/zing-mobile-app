@@ -1,26 +1,24 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:shimmer/shimmer.dart';
 import 'package:flutter/services.dart';
 import 'dart:ui';
 import 'package:intl/intl.dart';
 
 import 'package:zing/Service/ThemeProvider.dart';
-import 'package:zing/Widgets/StoreManagementWidgets/BuildProductGride.dart';
 import 'package:zing/Widgets/StoreManagementWidgets/OrederWidets.dart';
-import '../../Modal/CoustomUser.dart';
-import '../../Service/CoustomUserProvider.dart';
-import '../../Service/StoreProvider.dart';
-import '../../Widgets/StoreManagementWidgets/BuildRenewScreen.dart';
-import '../../Widgets/StoreManagementWidgets/BuildStoreHeader.dart';
-import '../../Widgets/StoreManagementWidgets/buildAddProductButton.dart';
-import '../../Widgets/StoreManagementWidgets/buildAddStoreButton.dart';
-import 'EditStoreScreen.dart';
-import 'EditProduct.dart';
+import 'package:zing/Modal/CoustomUser.dart';
+import 'package:zing/Service/CoustomUserProvider.dart';
+import 'package:zing/Widgets/StoreManagementWidgets/BuildRenewScreen.dart';
+import 'package:zing/Widgets/StoreManagementWidgets/buildAddStoreButton.dart';
+import 'package:zing/Widgets/Shared/zing_ios.dart';
+import 'package:zing/Widgets/Shared/zing_motion.dart';
+import 'package:zing/screen/StoreManagement/EditStoreScreen.dart';
+import 'package:zing/screen/StoreManagement/EditProduct.dart';
 
 class EnhancedStoreManagementWidget extends StatefulWidget {
-  const EnhancedStoreManagementWidget({Key? key}) : super(key: key);
+  const EnhancedStoreManagementWidget({super.key});
 
   @override
   State<EnhancedStoreManagementWidget> createState() => _EnhancedStoreManagementWidgetState();
@@ -191,7 +189,7 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
 
       if ((payments as List).isNotEmpty) {
         final paymentDate = Timestamp.parse(payments.first['paid_at']).toDate();
-        _daysLeft = 30 - DateTime.now().difference(paymentDate).inDays;
+        _daysLeft = CustomUser.accessDays - DateTime.now().difference(paymentDate).inDays;
 
         if (_daysLeft <= 0) {
           _hasAccess = false;
@@ -213,6 +211,7 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
 
       if (!mounted) return;
 
+      // Full model so the owner sees the real stock count.
       final products = (rows as List).map((r) => Product.fromRow(r)).toList();
 
       setState(() {
@@ -239,7 +238,10 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
       setState(() {
         _recentOrders = orders;
         _totalOrders = orders.length;
-        _totalRevenue = orders.fold(0, (prev, order) => prev + order.totalPrice);
+        // Cancelled orders earn nothing.
+        _totalRevenue = orders
+            .where((order) => order.status != OrderStatus.cancelled)
+            .fold(0, (prev, order) => prev + order.totalPrice);
       });
     } catch (e) {
       debugPrint("Error fetching orders: $e");
@@ -250,14 +252,12 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
     try {
       final rows = await _db.from('orders').select('user_id').eq('store_id', storeId);
 
-      final uniqueCustomers = <String>{};
-      for (final r in rows as List) {
-        final userId = r['user_id'] as String?;
-        if (userId != null) {
-          uniqueCustomers.add(userId);
-        }
-      }
+      final uniqueCustomers = <String>{
+        for (final r in rows as List)
+          if (r['user_id'] is String) r['user_id'] as String,
+      };
 
+      if (!mounted) return;
       setState(() {
         _totalCustomers = uniqueCustomers.length;
       });
@@ -273,7 +273,7 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
 
       final rows = await _db
           .from('orders')
-          .select('placed_at, total_price')
+          .select('placed_at, total_price, status')
           .eq('store_id', storeId)
           .gte('placed_at', lastWeek.toUtc().toIso8601String())
           .order('placed_at', ascending: true);
@@ -283,13 +283,16 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
       };
 
       for (final r in rows as List) {
+        // Cancelled orders are not sales.
+        if (r['status'] == OrderStatus.cancelled) continue;
         final placedAt = Timestamp.parse(r['placed_at']).toDate();
         final dayName = DateFormat('E').format(placedAt).substring(0, 3);
-        final price = (r['total_price'] as num).toDouble();
+        final price = (r['total_price'] as num?)?.toDouble() ?? 0;
 
         salesByDay[dayName] = (salesByDay[dayName] ?? 0) + price;
       }
 
+      if (!mounted) return;
       setState(() {
         _salesData = salesByDay;
       });
@@ -305,7 +308,7 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
       // Recent orders
       final rows = await _db
           .from('orders')
-          .select('id, placed_at, total_price')
+          .select('id, placed_at, total_price, status')
           .eq('store_id', storeId)
           .order('placed_at', ascending: false)
           .limit(3);
@@ -323,15 +326,18 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
           timeAgo = '${timeDiff.inDays} days ago';
         }
 
+        final total = (data['total_price'] as num?)?.toDouble() ?? 0;
+        final cancelled = data['status'] == OrderStatus.cancelled;
         activities.add({
           'type': 'order',
-          'title': 'New order #${(data['id'] as String).substring(0, 4)}',
-          'subtitle': 'Order of \$${data['total_price']} placed',
+          'title': '${cancelled ? 'Cancelled' : 'New'} order #${(data['id'] as String).substring(0, 4)}',
+          'subtitle': 'Order of Rs ${total.toStringAsFixed(2)} placed',
           'time': timeAgo,
-          'amount': '\$${(data['total_price'] as num).toStringAsFixed(2)}',
+          'amount': 'Rs ${total.toStringAsFixed(2)}',
         });
       }
 
+      if (!mounted) return;
       setState(() {
         _recentActivities = activities.take(5).toList();
       });
@@ -359,49 +365,12 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
     );
   }
 
-  void _showSuccessSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle, color: Colors.white),
-            const SizedBox(width: 12),
-            Text(message),
-          ],
-        ),
-        backgroundColor: ZingColors.success,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-    );
-  }
 
   void _navigateToAddProduct() {
     if (_currentUser?.store?.id != null) {
       Navigator.push(
         context,
-        PageRouteBuilder(
-          pageBuilder: (context, animation, secondaryAnimation) =>
-              EditProductScreen(storeId: _currentUser!.store!.id!),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            const begin = Offset(1.0, 0.0);
-            const end = Offset.zero;
-            const curve = Curves.easeInOutCubic;
-
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
-
-            return SlideTransition(
-              position: animation.drive(tween),
-              child: FadeTransition(
-                opacity: animation,
-                child: child,
-              ),
-            );
-          },
-          transitionDuration: const Duration(milliseconds: 400),
-        ),
+        zingRoute(EditProductScreen(storeId: _currentUser!.store!.id!)),
       ).then((_) {
         // Refresh products after returning from add product screen
         if (_currentUser?.store?.id != null) {
@@ -415,31 +384,10 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
     if (_currentUser?.store?.id != null) {
       Navigator.push(
         context,
-        PageRouteBuilder(
-          pageBuilder: (context, animation, secondaryAnimation) =>
-              EditProductScreen(
+        zingRoute(EditProductScreen(
                 product: product,
                 storeId: _currentUser!.store!.id!,
-              ),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            const begin = Offset(1.0, 0.0);
-            const end = Offset.zero;
-            const curve = Curves.easeInOutCubic;
-
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
-
-            return SlideTransition(
-              position: animation.drive(tween),
-              child: FadeTransition(
-                opacity: animation,
-                child: child,
-              ),
-            );
-          },
-          transitionDuration: const Duration(milliseconds: 400),
-        ),
+              )),
       ).then((_) {
         // Refresh products after returning from edit
         if (_currentUser?.store?.id != null) {
@@ -467,8 +415,6 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
     final screenWidth = MediaQuery.of(context).size.width;
     final isTablet = screenWidth > 600;
 
@@ -476,7 +422,7 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
       return _buildLoadingScreen();
     }
 
-    if (_currentUser == null || !_currentUser!.storeAccess!) {
+    if (_currentUser == null || !_currentUser!.storeAccess) {
       return _buildAccessDeniedScreen();
     }
 
@@ -506,225 +452,168 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
     );
   }
 
+  void _openRenew() {
+    final user = _currentUser;
+    if (user == null) return;
+    Navigator.of(context).push(zingRoute(
+      Scaffold(
+        appBar: AppBar(title: const Text('Subscription')),
+        body: buildRenewScreen(context, user),
+      ),
+    ));
+  }
+
+  static String _rs(double v) => 'Rs ${NumberFormat.decimalPattern().format(v.round())}';
+
+  /// Header: back, store name as a large title, edit, and status chips.
   Widget _buildAppBar(bool isTablet) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
+    final cs = Theme.of(context).colorScheme;
+    final store = _currentUser!.store!;
+    final expiring = _daysLeft <= 7;
 
-    return SlideTransition(
-      position: _slideAnimation,
-      child: Container(
+    Widget chip(String label, {IconData? icon, Color? color}) {
+      final c = color ?? cs.onSurfaceVariant;
+      return Container(
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              cs.primary,
-              cs.primary.withOpacity(0.8),
-            ],
-          ),
+          color: c.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(100),
         ),
-        child: SafeArea(
-          bottom: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[Icon(icon, size: 12, color: c), const SizedBox(width: 5)],
+            Text(label, style: ZingType.style(12, weight: FontWeight.w600, color: c)),
+          ],
+        ),
+      );
+    }
+
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
               children: [
-                // Store name and edit button
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _currentUser!.store!.name,
-                        style: theme.textTheme.headlineLarge!.copyWith(
-                          fontSize: isTablet ? 32 : 26,
-                          fontWeight: FontWeight.w800,
-                          color: cs.onPrimary,
-                          letterSpacing: -0.5,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: cs.onPrimary.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: IconButton(
-                        icon: Icon(Icons.edit, color: cs.onPrimary),
-                        onPressed: _openEditStoreDialog,
-                        tooltip: 'Edit Store Details',
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 12),
-
-                // Store status and subscription info
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: cs.onPrimary.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 6,
-                              height: 6,
-                              decoration: BoxDecoration(
-                                color: cs.onPrimary,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Active',
-                              style: theme.textTheme.bodySmall!.copyWith(
-                                color: cs.onPrimary,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: _daysLeft <= 7
-                              ? ZingColors.warning.withOpacity(0.2)
-                              : cs.onPrimary.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.schedule,
-                              size: 12,
-                              color: cs.onPrimary,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              '$_daysLeft days left',
-                              style: theme.textTheme.bodySmall!.copyWith(
-                                color: cs.onPrimary,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: cs.onPrimary.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.category,
-                              size: 12,
-                              color: cs.onPrimary,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              _currentUser!.store!.category,
-                              style: theme.textTheme.bodySmall!.copyWith(
-                                color: cs.onPrimary,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                if (Navigator.of(context).canPop())
+                  CupertinoNavigationBarBackButton(
+                    color: cs.primary,
+                    onPressed: () => Navigator.of(context).maybePop(),
                   ),
+                const Spacer(),
+                CupertinoButton(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  onPressed: _openEditStoreDialog,
+                  child: Text('Edit Store', style: ZingType.body(cs.primary)),
                 ),
               ],
             ),
-          ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              child: Text(
+                store.name,
+                style: isTablet ? ZingType.largeTitle(cs.onSurface) : ZingType.title1(cs.onSurface),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: [
+                  chip(store.isActive ? 'Live' : 'Hidden',
+                      icon: CupertinoIcons.circle_fill,
+                      color: store.isActive ? ZingColors.success : ZingColors.error),
+                  chip('$_daysLeft ${_daysLeft == 1 ? 'day' : 'days'} left',
+                      icon: CupertinoIcons.clock,
+                      color: expiring ? ZingColors.warning : null),
+                  chip(store.category, icon: CupertinoIcons.tag),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
   Widget _buildTabBar() {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    return SlideTransition(
-      position: _slideAnimation,
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(24, 20, 24, 20),
-        decoration: BoxDecoration(
-          color: cs.surface,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: ZingShadows.soft,
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: TabBar(
-            controller: _tabController,
-            labelColor: cs.onPrimary,
-            unselectedLabelColor: cs.onSurfaceVariant,
-            indicator: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [cs.primary, cs.primary.withOpacity(0.8)],
-              ),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            indicatorPadding: const EdgeInsets.all(4),
-            labelStyle: theme.textTheme.titleSmall!.copyWith(
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
-            ),
-            unselectedLabelStyle: theme.textTheme.titleSmall!.copyWith(
-              fontWeight: FontWeight.w500,
-              fontSize: 14,
-            ),
-            tabs: const [
-              Tab(text: 'Dashboard'),
-              Tab(text: 'Products'),
-              Tab(text: 'Orders'),
-            ],
-          ),
-        ),
+    final labels = const ['Dashboard', 'Products', 'Orders'];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: ZingSegmented<int>(
+        value: _selectedTabIndex,
+        segments: {
+          0: labels[0],
+          1: '${labels[1]} (${_products.length})',
+          2: labels[2],
+        },
+        onChanged: (i) => _tabController.animateTo(i),
       ),
     );
   }
 
   Widget _buildDashboardTab(bool isTablet) {
-    return SlideTransition(
-      position: _slideAnimation,
-      child: CustomScrollView(
-        physics: const BouncingScrollPhysics(),
-        slivers: [
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 100),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                if (_daysLeft <= 7 && _daysLeft > 0) _buildWarningBanner(),
-                _buildStatsCards(isTablet),
-                const SizedBox(height: 32),
-                _buildSalesChart(),
-                const SizedBox(height: 32),
-                _buildRecentActivity(),
-                const SizedBox(height: 32),
-                _buildQuickActions(isTablet),
-              ]),
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 110),
+      children: [
+        if (_daysLeft <= 7) ZingReveal(child: _buildWarningBanner()),
+        ZingReveal(child: _buildStatsCards(isTablet)),
+        ZingReveal(child: _buildStockAlerts()),
+        const SizedBox(height: 16),
+        ZingReveal(delay: const Duration(milliseconds: 60), child: _buildSalesChart()),
+        const SizedBox(height: 16),
+        ZingReveal(child: _buildQuickActions(isTablet)),
+        const SizedBox(height: 24),
+        ZingReveal(child: _buildRecentActivity()),
+      ],
+    );
+  }
+
+  Widget _buildWarningBanner() {
+    final cs = Theme.of(context).colorScheme;
+    final expired = _daysLeft <= 0;
+    final color = expired ? ZingColors.error : ZingColors.warning;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(ZingRadius.md),
+      ),
+      child: Row(
+        children: [
+          Icon(CupertinoIcons.exclamationmark_triangle_fill, color: color, size: 24),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(expired ? 'Subscription ended' : 'Subscription ending soon',
+                    style: ZingType.headline(cs.onSurface)),
+                const SizedBox(height: 2),
+                Text(
+                  expired
+                      ? 'Renew to make your store visible to customers again.'
+                      : 'Your store stays visible for $_daysLeft more ${_daysLeft == 1 ? 'day' : 'days'}.',
+                  style: ZingType.footnote(cs.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          ZingPressable(
+            onTap: _openRenew,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(100)),
+              child: Text('Renew', style: ZingType.style(15, weight: FontWeight.w600, color: Colors.white)),
             ),
           ),
         ],
@@ -732,186 +621,88 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
     );
   }
 
-  Widget _buildWarningBanner() {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 24),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [ZingColors.warning.withOpacity(0.1), cs.error.withOpacity(0.1)],
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: ZingColors.warning.withOpacity(0.3),
-          width: 1,
-        ),
-      ),
-      child: Row(
+  /// Products that are sold out or nearly so, most urgent first.
+  Widget _buildStockAlerts() {
+    final attention = _products.where((p) => !p.inStock || p.lowStock).toList()
+      ..sort((a, b) => a.quantity.compareTo(b.quantity));
+    if (attention.isEmpty) return const SizedBox.shrink();
+    final shown = attention.take(4).toList();
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: ZingGroupedSection(
+        margin: EdgeInsets.zero,
+        header: 'Needs attention',
+        footer: attention.length > shown.length
+            ? '${attention.length - shown.length} more low-stock products are in the Products tab.'
+            : 'Tap a product to update its stock.',
         children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: ZingColors.warning.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(12),
+          for (final p in shown)
+            ZingListRow(
+              icon: p.inStock
+                  ? CupertinoIcons.exclamationmark_triangle_fill
+                  : CupertinoIcons.xmark_circle_fill,
+              iconColor: p.inStock ? ZingColors.warning : ZingColors.error,
+              title: p.name,
+              subtitle: p.inStock ? 'Only ${p.quantity} left' : 'Sold out — hidden from buying',
+              onTap: () => _navigateToEditProduct(p),
             ),
-            child: Icon(
-              Icons.warning_rounded,
-              color: ZingColors.warning,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Subscription Expiring Soon',
-                  style: theme.textTheme.titleMedium!.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: ZingColors.warning,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Your store access expires in $_daysLeft days. Renew to continue.',
-                  style: theme.textTheme.bodyMedium!.copyWith(
-                    color: ZingColors.warning,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [ZingColors.warning, cs.error],
-              ),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: () {
-                  // Navigate to renewal
-                },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  child: Text(
-                    'Renew',
-                    style: TextStyle(
-                      color: cs.onPrimary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     );
   }
 
   Widget _buildStatsCards(bool isTablet) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    return ScaleTransition(
-      scale: _scaleAnimation,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final cards = [
+      _buildStatCard('Revenue', _rs(_totalRevenue), CupertinoIcons.chart_bar_alt_fill, ZingColors.success),
+      _buildStatCard('Orders', '$_totalOrders', CupertinoIcons.bag_fill, ZingColors.warning),
+      _buildStatCard('Customers', '$_totalCustomers', CupertinoIcons.person_2_fill, ZingColors.accent),
+      _buildStatCard('Products', '${_products.length}', CupertinoIcons.cube_box_fill, ZingColors.primary),
+    ];
+    if (isTablet) {
+      return Row(
         children: [
-          Text(
-            'Store Overview',
-            style: theme.textTheme.titleLarge!.copyWith(
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 20),
-          isTablet
-              ? Row(
-            children: [
-              Expanded(child: _buildStatCard('Products', '${_products.length}', Icons.inventory_2, cs.primary)),
-              const SizedBox(width: 16),
-              Expanded(child: _buildStatCard('Orders', '$_totalOrders', Icons.shopping_bag, ZingColors.warning)),
-              const SizedBox(width: 16),
-              Expanded(child: _buildStatCard('Customers', '$_totalCustomers', Icons.people, ZingColors.success)),
-              const SizedBox(width: 16),
-              Expanded(child: _buildStatCard('Revenue', '\$${_totalRevenue.toStringAsFixed(0)}', Icons.trending_up, cs.tertiary)),
-            ],
-          )
-              : Column(
-            children: [
-              Row(
-                children: [
-                  Expanded(child: _buildStatCard('Products', '${_products.length}', Icons.inventory_2, cs.primary)),
-                  const SizedBox(width: 16),
-                  Expanded(child: _buildStatCard('Orders', '$_totalOrders', Icons.shopping_bag, ZingColors.warning)),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(child: _buildStatCard('Customers', '$_totalCustomers', Icons.people, ZingColors.success)),
-                  const SizedBox(width: 16),
-                  Expanded(child: _buildStatCard('Revenue', '\$${_totalRevenue.toStringAsFixed(0)}', Icons.trending_up, cs.tertiary)),
-                ],
-              ),
-            ],
-          ),
+          for (var i = 0; i < cards.length; i++) ...[
+            if (i > 0) const SizedBox(width: 12),
+            Expanded(child: cards[i]),
+          ],
         ],
-      ),
+      );
+    }
+    return Column(
+      children: [
+        Row(children: [Expanded(child: cards[0]), const SizedBox(width: 12), Expanded(child: cards[1])]),
+        const SizedBox(height: 12),
+        Row(children: [Expanded(child: cards[2]), const SizedBox(width: 12), Expanded(child: cards[3])]),
+      ],
     );
   }
 
   Widget _buildStatCard(String title, String value, IconData icon, Color color) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
+    final cs = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: cs.surface,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: ZingShadows.soft,
+        borderRadius: BorderRadius.circular(ZingRadius.lg),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: color, size: 24),
+              ZingIconTile(icon: icon, color: color, size: 28),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(title,
+                    style: ZingType.subhead(cs.onSurfaceVariant).copyWith(fontWeight: FontWeight.w600)),
               ),
-              Icon(Icons.more_horiz, color: cs.onSurfaceVariant, size: 20),
             ],
           ),
-          const SizedBox(height: 20),
-          Text(
-            value,
-            style: theme.textTheme.headlineLarge!.copyWith(
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            title,
-            style: theme.textTheme.bodyMedium!.copyWith(
-              fontWeight: FontWeight.w500,
-            ),
+          const SizedBox(height: 14),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(value, style: ZingType.title1(cs.onSurface)),
           ),
         ],
       ),
@@ -919,347 +710,153 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
   }
 
   Widget _buildSalesChart() {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
+    final cs = Theme.of(context).colorScheme;
+    final weekTotal = _salesData.values.fold<double>(0, (a, b) => a + b);
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: cs.surface,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: ZingShadows.soft,
+        borderRadius: BorderRadius.circular(ZingRadius.lg),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Sales Analytics',
-                style: theme.textTheme.titleLarge!.copyWith(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: cs.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  'This week',
-                  style: theme.textTheme.bodySmall!.copyWith(
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          SizedBox(
-            height: 200,
-            child: _buildCustomChart(),
-          ),
+          Text('SALES THIS WEEK',
+              style: ZingType.style(12, weight: FontWeight.w600, color: cs.onSurfaceVariant, letterSpacing: 0.4)),
+          const SizedBox(height: 4),
+          Text(_rs(weekTotal), style: ZingType.title1(cs.onSurface)),
+          const SizedBox(height: 16),
+          SizedBox(height: 150, child: _buildCustomChart()),
         ],
       ),
     );
   }
 
   Widget _buildCustomChart() {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    if (_salesData.isEmpty) {
+    final cs = Theme.of(context).colorScheme;
+    if (_salesData.isEmpty || _salesData.values.every((v) => v == 0)) {
       return Center(
-        child: Text(
-          "No sales data available",
-          style: theme.textTheme.bodyMedium,
-        ),
+        child: Text('No sales yet this week', style: ZingType.subhead(cs.onSurfaceVariant)),
       );
     }
-
-    final maxValue = _salesData.values.isNotEmpty
-        ? _salesData.values.reduce((a, b) => a > b ? a : b)
-        : 100;
+    final maxValue = _salesData.values.reduce((a, b) => a > b ? a : b);
 
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceAround,
       crossAxisAlignment: CrossAxisAlignment.end,
-      children: _salesData.entries.map((entry) {
-        final percentage = maxValue > 0 ? entry.value / maxValue : 0;
-        final isHighest = maxValue > 0 && entry.value == maxValue;
-
-        return Column(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            Container(
-              width: 32,
-              height: (160 * percentage).toDouble(),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: isHighest
-                      ? [cs.primary, cs.primary.withOpacity(0.8)]
-                      : [cs.outline, cs.surfaceContainerHighest],
-                ),
-                borderRadius: BorderRadius.circular(6),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              entry.key,
-              style: theme.textTheme.bodySmall!.copyWith(
-                fontWeight: isHighest ? FontWeight.w600 : FontWeight.w500,
-                color: isHighest ? cs.primary : cs.onSurfaceVariant,
-              ),
-            ),
-          ],
-        );
-      }).toList(),
-    );
-  }
-
-  Widget _buildRecentActivity() {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: ZingShadows.soft,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Recent Activity',
-                style: theme.textTheme.titleLarge!.copyWith(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              TextButton(
-                onPressed: () {
-                  _tabController.animateTo(2); // Switch to Orders tab
-                },
-                child: Text(
-                  'View All',
-                  style: theme.textTheme.titleSmall!.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: cs.primary,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          if (_recentActivities.isEmpty)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.timeline,
-                      size: 48,
-                      color: cs.onSurfaceVariant,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'No recent activities',
-                      style: theme.textTheme.titleMedium!.copyWith(
-                        color: cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          else
-            ..._recentActivities.map((activity) => _buildActivityItem(activity)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActivityItem(Map<String, dynamic> activity) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [cs.primary, cs.primary.withOpacity(0.8)],
-              ),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              Icons.shopping_bag,
-              color: cs.onPrimary,
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 16),
+      children: [
+        for (final entry in _salesData.entries)
           Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                Text(
-                  activity['title'],
-                  style: theme.textTheme.titleSmall!.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: cs.onSurface,
-                    fontSize: 14,
+                // Bars grow from the baseline when the chart appears.
+                TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0, end: maxValue > 0 ? entry.value / maxValue : 0),
+                  duration: ZingMotion.slow,
+                  curve: ZingMotion.emphasized,
+                  builder: (_, t, __) => Container(
+                    height: 4 + 116 * t,
+                    margin: const EdgeInsets.symmetric(horizontal: 6),
+                    decoration: BoxDecoration(
+                      color: entry.value == maxValue ? cs.primary : cs.primary.withValues(alpha: 0.28),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 8),
                 Text(
-                  activity['subtitle'],
-                  style: theme.textTheme.bodySmall,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  activity['time'],
-                  style: theme.textTheme.labelSmall!.copyWith(
-                    fontSize: 11,
-                  ),
+                  entry.key,
+                  style: ZingType.style(11,
+                      weight: entry.value == maxValue ? FontWeight.w600 : FontWeight.w400,
+                      color: entry.value == maxValue ? cs.onSurface : cs.onSurfaceVariant),
                 ),
               ],
             ),
           ),
-          if (activity['amount'] != null)
-            Text(
-              activity['amount'],
-              style: theme.textTheme.titleSmall!.copyWith(
-                fontWeight: FontWeight.w700,
-                color: ZingColors.success,
-                fontSize: 14,
-              ),
-            ),
-        ],
-      ),
+      ],
+    );
+  }
+
+  Widget _buildRecentActivity() {
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ZingSectionTitle(
+          title: 'Recent Activity',
+          actionLabel: _recentActivities.isEmpty ? null : 'See All',
+          onAction: () => _tabController.animateTo(2),
+          padding: const EdgeInsets.fromLTRB(4, 0, 0, 10),
+        ),
+        ZingGroupedSection(
+          margin: EdgeInsets.zero,
+          separatorIndent: 60,
+          children: _recentActivities.isEmpty
+              ? [
+                  Padding(
+                    padding: const EdgeInsets.all(28),
+                    child: Center(
+                      child: Text('New orders will show up here.',
+                          style: ZingType.subhead(cs.onSurfaceVariant)),
+                    ),
+                  ),
+                ]
+              : _recentActivities.map(_buildActivityItem).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActivityItem(Map<String, dynamic> activity) {
+    final amount = activity['amount']?.toString().replaceAll(r'$', 'Rs ');
+    return ZingListRow(
+      icon: CupertinoIcons.bag_fill,
+      iconColor: ZingColors.primary,
+      title: '${activity['title']}',
+      subtitle: '${activity['subtitle']} · ${activity['time']}',
+      trailing: amount == null
+          ? null
+          : Text(amount, style: ZingType.style(15, weight: FontWeight.w600, color: ZingColors.success)),
     );
   }
 
   Widget _buildQuickActions(bool isTablet) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    final actions = [
-      {
-        'title': 'Add Product',
-        'icon': Icons.add_box,
-        'color': cs.primary,
-        'onTap': _navigateToAddProduct,
-      },
-      {
-        'title': 'View Orders',
-        'icon': Icons.shopping_bag,
-        'color': ZingColors.warning,
-        'onTap': () => _tabController.animateTo(2),
-      },
-      {
-        'title': 'Edit Store',
-        'icon': Icons.store,
-        'color': cs.tertiary,
-        'onTap': _openEditStoreDialog,
-      },
-      {
-        'title': 'Analytics',
-        'icon': Icons.analytics,
-        'color': ZingColors.success,
-        'onTap': () {},
-      },
+    final cs = Theme.of(context).colorScheme;
+    final actions = <(String, IconData, VoidCallback)>[
+      ('Add Product', CupertinoIcons.plus_app_fill, _navigateToAddProduct),
+      ('Orders', CupertinoIcons.bag_fill, () => _tabController.animateTo(2)),
+      ('Edit Store', CupertinoIcons.pencil, _openEditStoreDialog),
+      ('Renew', CupertinoIcons.creditcard_fill, _openRenew),
     ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        Text(
-          'Quick Actions',
-          style: theme.textTheme.titleLarge!.copyWith(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 20),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: isTablet ? 4 : 2,
-            childAspectRatio: 1.1,
-            crossAxisSpacing: 16,
-            mainAxisSpacing: 16,
-          ),
-          itemCount: actions.length,
-          itemBuilder: (context, index) {
-            final action = actions[index];
-            return Container(
-              decoration: BoxDecoration(
-                color: cs.surface,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: ZingShadows.soft,
-              ),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(20),
-                  onTap: action['onTap'] as VoidCallback,
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                (action['color'] as Color).withOpacity(0.1),
-                                (action['color'] as Color).withOpacity(0.05),
-                              ],
-                            ),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Icon(
-                            action['icon'] as IconData,
-                            color: action['color'] as Color,
-                            size: 28,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          action['title'] as String,
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.titleSmall!.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: cs.onSurface,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+        for (var i = 0; i < actions.length; i++) ...[
+          if (i > 0) const SizedBox(width: 8),
+          Expanded(
+            child: ZingPressable(
+              pressedScale: 0.94,
+              onTap: actions[i].$3,
+              child: Container(
+                height: 66,
+                decoration: BoxDecoration(
+                  color: cs.surface,
+                  borderRadius: BorderRadius.circular(ZingRadius.md),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(actions[i].$2, color: cs.primary, size: 22),
+                    const SizedBox(height: 5),
+                    Text(actions[i].$1,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: ZingType.style(12, weight: FontWeight.w600, color: cs.primary)),
+                  ],
                 ),
               ),
-            );
-          },
-        ),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -1315,12 +912,12 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
         Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [cs.primary, cs.primary.withOpacity(0.8)],
+              colors: [cs.primary, cs.primary.withValues(alpha: 0.8)],
             ),
             borderRadius: BorderRadius.circular(12),
             boxShadow: [
               BoxShadow(
-                color: cs.primary.withOpacity(0.3),
+                color: cs.primary.withValues(alpha: 0.3),
                 blurRadius: 8,
                 offset: const Offset(0, 4),
               ),
@@ -1399,7 +996,7 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
             Container(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [cs.primary, cs.primary.withOpacity(0.8)],
+                  colors: [cs.primary, cs.primary.withValues(alpha: 0.8)],
                 ),
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -1498,13 +1095,17 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
                             vertical: 4,
                           ),
                           decoration: BoxDecoration(
-                            color: product.isAvailable
-                                ? ZingColors.success.withOpacity(0.9)
-                                : cs.error.withOpacity(0.9),
+                            color: product.inStock
+                                ? ZingColors.success.withValues(alpha: 0.9)
+                                : cs.error.withValues(alpha: 0.9),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            product.isAvailable ? 'In Stock' : 'Out of Stock',
+                            !product.isAvailable
+                                ? 'Unavailable'
+                                : product.quantity > 0
+                                    ? 'In Stock (${product.quantity})'
+                                    : 'Out of Stock',
                             style: TextStyle(
                               color: cs.onPrimary,
                               fontSize: 10,
@@ -1547,7 +1148,7 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
                         if (product.rating != null)
                           Row(
                             children: [
-                              Icon(
+                              const Icon(
                                 Icons.star,
                                 color: ZingColors.warning,
                                 size: 14,
@@ -1669,7 +1270,6 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
 
   Widget _buildOrdersHeader() {
     final theme = Theme.of(context);
-    final cs = theme.colorScheme;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1765,7 +1365,7 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: statusColor.withOpacity(0.1),
+                      color: statusColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
@@ -1796,7 +1396,7 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.1),
+                  color: statusColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
@@ -1859,12 +1459,12 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
       child: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [cs.primary, cs.primary.withOpacity(0.8)],
+            colors: [cs.primary, cs.primary.withValues(alpha: 0.8)],
           ),
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: cs.primary.withOpacity(0.4),
+              color: cs.primary.withValues(alpha: 0.4),
               blurRadius: 12,
               offset: const Offset(0, 6),
             ),
@@ -2024,7 +1624,7 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
-                      colors: [cs.primary, cs.primary.withOpacity(0.8)],
+                      colors: [cs.primary, cs.primary.withValues(alpha: 0.8)],
                     ),
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -2073,8 +1673,8 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [
-              cs.primary.withOpacity(0.1),
-              cs.tertiary.withOpacity(0.1),
+              cs.primary.withValues(alpha: 0.1),
+              cs.tertiary.withValues(alpha: 0.1),
             ],
           ),
         ),
@@ -2087,7 +1687,7 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
                 height: 80,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [cs.primary, cs.primary.withOpacity(0.8)],
+                    colors: [cs.primary, cs.primary.withValues(alpha: 0.8)],
                   ),
                   borderRadius: BorderRadius.circular(20),
                 ),
@@ -2130,7 +1730,7 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              cs.primary.withOpacity(0.1),
+              cs.primary.withValues(alpha: 0.1),
               cs.surface,
             ],
           ),
@@ -2188,7 +1788,7 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
 
 // Usage for backward compatibility
 class StoreManagementWidget extends StatelessWidget {
-  const StoreManagementWidget({Key? key}) : super(key: key);
+  const StoreManagementWidget({super.key});
 
   @override
   Widget build(BuildContext context) {

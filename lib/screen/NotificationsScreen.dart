@@ -1,10 +1,13 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import 'package:zing/Modal/NotificationModel.dart';
+import 'package:zing/screen/UserScreens/OrderHistoryPage.dart';
 import 'package:zing/Service/NotificationProvider.dart';
 import 'package:zing/Service/ThemeProvider.dart';
-import 'package:zing/Widgets/Shared/zing_empty_state.dart';
+import 'package:zing/Widgets/Shared/zing_ios.dart';
+import 'package:zing/Widgets/Shared/zing_motion.dart';
 import 'package:zing/Widgets/Shared/zing_shimmer.dart';
 
 class NotificationsScreen extends StatefulWidget {
@@ -23,127 +26,118 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     });
   }
 
+  void _open(ZingNotification n) {
+    final provider = Provider.of<NotificationProvider>(context, listen: false);
+    if (!n.isRead) provider.markAsRead(n.id);
+    if (n.type == 'order') {
+      Navigator.of(context).push(zingRoute(const OrderHistoryPage()));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
+    final cs = Theme.of(context).colorScheme;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Notifications'),
-        actions: [
-          Consumer<NotificationProvider>(
-            builder: (context, provider, _) {
-              if (provider.unreadCount == 0) return const SizedBox.shrink();
-              return TextButton(
+    return Consumer<NotificationProvider>(
+      builder: (context, provider, _) {
+        return ZingLargeTitlePage(
+          title: 'Notifications',
+          showBack: true,
+          onRefresh: () async => provider.startListening(),
+          actions: [
+            if (provider.unreadCount > 0)
+              CupertinoButton(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(40, 40),
                 onPressed: provider.markAllAsRead,
-                child: Text('Mark all read', style: theme.textTheme.titleSmall?.copyWith(color: cs.primary)),
-              );
-            },
-          ),
-        ],
-      ),
-      body: Consumer<NotificationProvider>(
-        builder: (context, provider, _) {
-          if (provider.isLoading) {
-            return _buildShimmerLoading();
-          }
-
-          if (provider.notifications.isEmpty) {
-            return const ZingEmptyState(
-              icon: Icons.notifications_none_rounded,
-              title: 'No notifications',
-              subtitle: 'You\'re all caught up! Check back later for updates.',
-            );
-          }
-
-          return RefreshIndicator(
-            onRefresh: () async => provider.startListening(),
-            child: ListView(
-              padding: const EdgeInsets.only(bottom: ZingSpacing.xl),
-              children: [
-                if (provider.todayNotifications.isNotEmpty)
-                  _buildGroup('Today', provider.todayNotifications, theme),
-                if (provider.yesterdayNotifications.isNotEmpty)
-                  _buildGroup('Yesterday', provider.yesterdayNotifications, theme),
-                if (provider.earlierNotifications.isNotEmpty)
-                  _buildGroup('Earlier', provider.earlierNotifications, theme),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildShimmerLoading() {
-    return ListView.builder(
-      padding: const EdgeInsets.all(ZingSpacing.md),
-      itemCount: 5,
-      itemBuilder: (_, __) => Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: Row(
-          children: [
-            ZingShimmer.circle(size: 44),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ZingShimmer.box(height: 14, width: 180),
-                  const SizedBox(height: 8),
-                  ZingShimmer.box(height: 12, width: 240),
-                ],
+                child: Text('Read All', style: ZingType.body(cs.primary)),
               ),
-            ),
           ],
+          slivers: [
+            if (provider.isLoading)
+              SliverList.builder(
+                itemCount: 4,
+                itemBuilder: (_, __) => Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                  child: ZingShimmer.box(height: 76, borderRadius: ZingRadius.md),
+                ),
+              )
+            else if (provider.notifications.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(40, 0, 40, 120),
+                  child: ZingReveal(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(CupertinoIcons.bell_slash, size: 48,
+                            color: cs.onSurfaceVariant.withValues(alpha: 0.45)),
+                        const SizedBox(height: 14),
+                        Text('You’re all caught up', style: ZingType.title3(cs.onSurface)),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Order updates and offers from stores will appear here.',
+                          style: ZingType.subhead(cs.onSurfaceVariant),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            else ...[
+              _group('Today', provider.todayNotifications, DateFormat.jm()),
+              _group('Yesterday', provider.yesterdayNotifications, DateFormat.jm()),
+              _group('Earlier', provider.earlierNotifications, DateFormat('d MMM')),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _group(String title, List<ZingNotification> items, DateFormat fmt) {
+    if (items.isEmpty) return const SliverToBoxAdapter(child: SizedBox.shrink());
+    return SliverToBoxAdapter(
+      child: ZingReveal(
+        child: ZingGroupedSection(
+          header: title,
+          separatorIndent: 62,
+          children: [for (final n in items) _NotificationRow(n: n, fmt: fmt, onTap: () => _open(n))],
         ),
       ),
     );
   }
+}
 
-  Widget _buildGroup(String title, List<ZingNotification> items, ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(ZingSpacing.lg, ZingSpacing.lg, ZingSpacing.lg, ZingSpacing.sm),
-          child: Text(title, style: theme.textTheme.titleSmall),
-        ),
-        ...items.map((n) => _buildNotificationTile(n, theme)),
-      ],
-    );
-  }
+class _NotificationRow extends StatelessWidget {
+  final ZingNotification n;
+  final DateFormat fmt;
+  final VoidCallback onTap;
 
-  Widget _buildNotificationTile(ZingNotification notification, ThemeData theme) {
-    final cs = theme.colorScheme;
-    final timeFormat = DateFormat.jm();
-    final icon = _getIcon(notification.type);
-    final iconColor = _getIconColor(notification.type, cs);
+  const _NotificationRow({required this.n, required this.fmt, required this.onTap});
 
-    return InkWell(
-      onTap: () {
-        if (!notification.isRead) {
-          Provider.of<NotificationProvider>(context, listen: false)
-              .markAsRead(notification.id);
-        }
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: ZingSpacing.lg, vertical: 14),
-        color: notification.isRead ? Colors.transparent : cs.primary.withOpacity(0.03),
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final (IconData icon, Color color) = switch (n.type) {
+      'order' => (CupertinoIcons.doc_text_fill, ZingColors.success),
+      'promo' => (CupertinoIcons.tag_fill, ZingColors.secondary),
+      'chat' => (CupertinoIcons.chat_bubble_fill, ZingColors.accent),
+      _ => (CupertinoIcons.bell_fill, ZingColors.primary),
+    };
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 14, 12),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: iconColor.withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: iconColor, size: 20),
-            ),
-            const SizedBox(width: 14),
+            ZingIconTile(icon: icon, color: color, size: 34),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -152,58 +146,33 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                          notification.title,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: notification.isRead ? FontWeight.w500 : FontWeight.w700,
-                            color: cs.onSurface,
+                          n.title,
+                          style: ZingType.headline(cs.onSurface).copyWith(
+                            fontWeight: n.isRead ? FontWeight.w500 : FontWeight.w600,
                           ),
                         ),
                       ),
-                      Text(
-                        timeFormat.format(notification.createdAt.toDate()),
-                        style: theme.textTheme.labelSmall,
-                      ),
+                      Text(fmt.format(n.createdAt.toDate()), style: ZingType.footnote(cs.onSurfaceVariant)),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    notification.body,
-                    style: theme.textTheme.bodySmall,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  const SizedBox(height: 2),
+                  Text(n.body,
+                      style: ZingType.subhead(cs.onSurfaceVariant),
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis),
                 ],
               ),
             ),
-            if (!notification.isRead)
-              Container(
-                width: 8,
-                height: 8,
-                margin: const EdgeInsets.only(left: 8, top: 6),
-                decoration: BoxDecoration(
-                  color: cs.primary,
-                  shape: BoxShape.circle,
-                ),
-              ),
+            AnimatedContainer(
+              duration: ZingMotion.medium,
+              width: n.isRead ? 0 : 9,
+              height: 9,
+              margin: EdgeInsets.only(left: n.isRead ? 0 : 10, top: 6),
+              decoration: BoxDecoration(color: cs.primary, shape: BoxShape.circle),
+            ),
           ],
         ),
       ),
     );
-  }
-
-  IconData _getIcon(String type) {
-    switch (type) {
-      case 'order': return Icons.receipt_long_rounded;
-      case 'promo': return Icons.local_offer_rounded;
-      default: return Icons.notifications_rounded;
-    }
-  }
-
-  Color _getIconColor(String type, ColorScheme cs) {
-    switch (type) {
-      case 'order': return ZingColors.success;
-      case 'promo': return cs.secondary;
-      default: return cs.primary;
-    }
   }
 }

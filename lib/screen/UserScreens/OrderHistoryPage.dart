@@ -1,869 +1,743 @@
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
-import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
-import 'package:shimmer/shimmer.dart';
-import 'package:zing/Service/OrderProvider.dart';
-import 'package:zing/Service/StoreProvider.dart';
-import 'package:zing/Service/RecommendationProvider.dart';
-import 'package:zing/Service/ThemeProvider.dart';
+import 'package:provider/provider.dart';
+import 'package:zing/Cart/CartProvider.dart';
 import 'package:zing/Modal/CoustomUser.dart';
+import 'package:zing/Service/CoustomUserProvider.dart';
+import 'package:zing/Service/OrderProvider.dart';
+import 'package:zing/Service/RecommendationProvider.dart';
+import 'package:zing/Service/StoreProvider.dart';
+import 'package:zing/Service/ThemeProvider.dart';
 import 'package:zing/Widgets/Recommendations/RecommendedStoresRow.dart';
-import '../../Service/CoustomUserProvider.dart';
+import 'package:zing/Widgets/Shared/zing_ios.dart';
+import 'package:zing/Widgets/Shared/zing_motion.dart';
+import 'package:zing/Widgets/Shared/zing_shimmer.dart';
+
+enum _OrderFilter { active, past }
 
 class OrderHistoryPage extends StatefulWidget {
-  /// When true, hides the back button so the page can serve as a root tab.
+  /// Kept for older callers; the back button now appears only when the page
+  /// was pushed.
   final bool isRootTab;
 
-  const OrderHistoryPage({Key? key, this.isRootTab = false}) : super(key: key);
+  const OrderHistoryPage({super.key, this.isRootTab = false});
 
   @override
-  _OrderHistoryPageState createState() => _OrderHistoryPageState();
+  State<OrderHistoryPage> createState() => _OrderHistoryPageState();
 }
 
-class _OrderHistoryPageState extends State<OrderHistoryPage> with SingleTickerProviderStateMixin {
-  Future<List<Orders>>? _orderFuture;
-  bool _isLoading = true;
-  final GlobalKey<RefreshIndicatorState> _refreshIndicatorKey = GlobalKey<RefreshIndicatorState>();
-  late AnimationController _animationController;
+class _OrderHistoryPageState extends State<OrderHistoryPage> {
+  List<Orders> _orders = const [];
+  bool _loading = true;
+  String? _error;
+  _OrderFilter _filter = _OrderFilter.active;
 
   @override
   void initState() {
     super.initState();
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadOrders();
-    });
-  }
-
-  @override
-  void dispose() {
-    _animationController.dispose();
-    super.dispose();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadOrders());
   }
 
   Future<void> _loadOrders() async {
+    final user = Provider.of<CustomUserProvider>(context, listen: false).currentUser;
+    if (user == null) {
+      setState(() => _loading = false);
+      return;
+    }
     setState(() {
-      _isLoading = true;
+      _loading = _orders.isEmpty;
+      _error = null;
     });
-
     try {
-      final userProvider = Provider.of<CustomUserProvider>(context, listen: false);
-      final orderProvider = Provider.of<OrderProvider>(context, listen: false);
-
-      final CustomUser? user = userProvider.currentUser;
-      if (user != null) {
-        _orderFuture = orderProvider.fetchUserOrdersAcrossStores(user.id);
-        await _orderFuture; // Wait for it to complete
-      }
+      final orders = await Provider.of<OrderProvider>(context, listen: false)
+          .fetchUserOrdersAcrossStores(user.id);
+      orders.sort((a, b) => b.placedAt.compareTo(a.placedAt));
+      if (!mounted) return;
+      setState(() {
+        _orders = orders;
+        _loading = false;
+        // Land on Past when nothing is in progress.
+        if (orders.isNotEmpty && orders.every((o) => OrderStatus.isFinal(o.status))) {
+          _filter = _OrderFilter.past;
+        }
+      });
+      Provider.of<RecommendationProvider>(context, listen: false)
+          .fetchRecommendations(placement: RecommendationProvider.postOrderStores);
     } catch (e) {
-      print('Error loading orders: $e');
-    } finally {
+      debugPrint('Error loading orders: $e');
       if (mounted) {
         setState(() {
-          _isLoading = false;
+          _loading = false;
+          _error = 'We couldn’t load your orders. Pull down to try again.';
         });
-
-        // Fetch post-order store recommendations
-        Provider.of<RecommendationProvider>(context, listen: false)
-            .fetchRecommendations(
-          placement: RecommendationProvider.postOrderStores,
-        );
       }
     }
   }
 
+  void _openOrder(Orders order, Store? store) async {
+    await showZingSheet<void>(
+      context,
+      builder: (_) => _OrderDetailSheet(order: order, store: store),
+    );
+    if (mounted) setState(() {}); // status may have changed (cancel)
+  }
+
   @override
   Widget build(BuildContext context) {
-    final userProvider = Provider.of<CustomUserProvider>(context);
-    final storeProvider = Provider.of<StoreProvider>(context);
-    final CustomUser? user = userProvider.currentUser;
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
+    final user = Provider.of<CustomUserProvider>(context).currentUser;
+    final stores = Provider.of<StoreProvider>(context).stores;
+    Store? storeFor(Orders o) {
+      for (final s in stores) {
+        if (s.id == o.storeId) return s;
+      }
+      return null;
+    }
 
-    return Scaffold(
-      backgroundColor: cs.surface,
-      appBar: AppBar(
-        elevation: 0,
-        title: Text('Order History'),
-        centerTitle: true,
-        leading: widget.isRootTab
-            ? null
-            : IconButton(
-                icon: const Icon(
-                  Icons.arrow_back_ios_new_rounded,
-                  size: 20,
-                ),
-                onPressed: () => Navigator.pop(context),
+    final active = _orders.where((o) => !OrderStatus.isFinal(o.status)).toList();
+    final past = _orders.where((o) => OrderStatus.isFinal(o.status)).toList();
+    final shown = _filter == _OrderFilter.active ? active : past;
+
+    return ZingLargeTitlePage(
+      title: 'Orders',
+      showBack: true,
+      onRefresh: _loadOrders,
+      slivers: [
+        if (user != null && !_loading && _orders.isNotEmpty)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: ZingSegmented<_OrderFilter>(
+                value: _filter,
+                segments: {
+                  _OrderFilter.active: active.isEmpty ? 'In Progress' : 'In Progress (${active.length})',
+                  _OrderFilter.past: 'Past',
+                },
+                onChanged: (f) => setState(() => _filter = f),
               ),
-        automaticallyImplyLeading: !widget.isRootTab,
-        systemOverlayStyle: const SystemUiOverlayStyle(
-          statusBarColor: Colors.transparent,
-          statusBarIconBrightness: Brightness.light,
-        ),
-      ),
-      body: user == null
-          ? _buildUserNotFoundState()
-          : RefreshIndicator(
-        key: _refreshIndicatorKey,
-        color: cs.primary,
-        backgroundColor: cs.surface,
-        onRefresh: _loadOrders,
-        child: FutureBuilder<List<Orders>>(
-          future: _orderFuture,
-          builder: (context, orderSnapshot) {
-            if (orderSnapshot.connectionState == ConnectionState.waiting && _isLoading) {
-              return _buildLoadingState();
-            } else if (orderSnapshot.hasError) {
-              return _buildErrorState(orderSnapshot.error.toString());
-            } else if (!orderSnapshot.hasData || orderSnapshot.data!.isEmpty) {
-              return _buildEmptyState();
-            } else {
-              return _buildOrderList(context, orderSnapshot.data!, storeProvider);
-            }
-          },
+            ),
+          ),
+        if (_loading)
+          SliverList.builder(
+            itemCount: 3,
+            itemBuilder: (_, __) => Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: ZingShimmer.box(height: 150, borderRadius: ZingRadius.lg),
+            ),
+          )
+        else if (_error != null)
+          SliverToBoxAdapter(
+            child: _Message(icon: CupertinoIcons.wifi_exclamationmark, title: 'Something went wrong', body: _error!),
+          )
+        else if (_orders.isEmpty)
+          const SliverToBoxAdapter(
+            child: _Message(
+              icon: CupertinoIcons.doc_text,
+              title: 'No orders yet',
+              body: 'When you buy from a store, your orders and their progress show up here.',
+            ),
+          )
+        else if (shown.isEmpty)
+          SliverToBoxAdapter(
+            child: _Message(
+              icon: _filter == _OrderFilter.active ? CupertinoIcons.checkmark_seal : CupertinoIcons.clock,
+              title: _filter == _OrderFilter.active ? 'Nothing in progress' : 'No past orders',
+              body: _filter == _OrderFilter.active
+                  ? 'All your orders are complete.'
+                  : 'Completed and cancelled orders will appear here.',
+            ),
+          )
+        else
+          SliverList.builder(
+            itemCount: shown.length,
+            itemBuilder: (context, i) => ZingReveal(
+              key: ValueKey(shown[i].id),
+              delay: Duration(milliseconds: 40 * (i % 4)),
+              child: _OrderCard(
+                order: shown[i],
+                store: storeFor(shown[i]),
+                onTap: () => _openOrder(shown[i], storeFor(shown[i])),
+              ),
+            ),
+          ),
+        if (!_loading && user != null)
+          SliverToBoxAdapter(
+            child: RecommendedStoresRow(
+              placement: RecommendationProvider.postOrderStores,
+              sectionTitle: 'Shop Again',
+              user: user,
+            ),
+          ),
+        if (user == null)
+          SliverToBoxAdapter(
+            child: _Message(
+              icon: CupertinoIcons.person_crop_circle_badge_exclam,
+              title: 'Not signed in',
+              body: 'Sign in to see your orders.',
+              action: ('Sign In', () => Navigator.pushNamed(context, '/login')),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+Color _statusColor(String status) {
+  switch (status) {
+    case OrderStatus.pending:
+      return ZingColors.warning;
+    case OrderStatus.processed:
+      return ZingColors.accent;
+    case OrderStatus.shipped:
+      return ZingColors.primary;
+    case OrderStatus.delivered:
+      return ZingColors.success;
+    case OrderStatus.cancelled:
+      return ZingColors.error;
+    default:
+      return ZingColors.textLight;
+  }
+}
+
+String _money(double v) => 'Rs ${v.toStringAsFixed(v % 1 == 0 ? 0 : 2)}';
+
+class _OrderCard extends StatelessWidget {
+  final Orders order;
+  final Store? store;
+  final VoidCallback onTap;
+
+  const _OrderCard({required this.order, required this.store, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final color = _statusColor(order.status);
+    final lines = order.lines;
+    final summary = lines.length == 1
+        ? '${lines.first.quantity} × ${lines.first.name}'
+        : '${order.itemCount} items · ${lines.take(2).map((l) => l.name).join(', ')}${lines.length > 2 ? '…' : ''}';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+      child: ZingPressable(
+        pressedScale: 0.98,
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: cs.surface,
+            borderRadius: BorderRadius.circular(ZingRadius.lg),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _StoreThumb(url: store?.imageUrl),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          order.storeName.isNotEmpty ? order.storeName : (store?.name ?? 'Store'),
+                          style: ZingType.headline(cs.onSurface),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          DateFormat('d MMM yyyy · h:mm a').format(order.placedAt.toDate()),
+                          style: ZingType.footnote(cs.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.13),
+                      borderRadius: BorderRadius.circular(100),
+                    ),
+                    child: Text(
+                      OrderStatus.customerLabel(order.status, order.deliveryMethod),
+                      style: ZingType.style(12, weight: FontWeight.w600, color: color),
+                    ),
+                  ),
+                ],
+              ),
+              if (order.status != OrderStatus.cancelled) ...[
+                const SizedBox(height: 16),
+                _ProgressTrack(order: order),
+              ],
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(summary,
+                        style: ZingType.subhead(cs.onSurfaceVariant),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(_money(order.totalPrice), style: ZingType.headline(cs.onSurface)),
+                  const SizedBox(width: 4),
+                  Icon(CupertinoIcons.chevron_forward,
+                      size: 15, color: cs.onSurfaceVariant.withValues(alpha: 0.55)),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
+}
 
-  // Loading state with shimmer effect
-  Widget _buildLoadingState() {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return SingleChildScrollView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      child: Column(
-        children: List.generate(
-          3,
-              (index) => Shimmer.fromColors(
-            baseColor: cs.surfaceContainerHighest,
-            highlightColor: cs.surface,
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 16),
-              height: 200,
-              decoration: BoxDecoration(
-                color: cs.surface,
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+/// Four-step tracker: Placed → Preparing → Out for delivery/Ready → Done.
+class _ProgressTrack extends StatelessWidget {
+  final Orders order;
+  const _ProgressTrack({required this.order});
 
-  // User not found state
-  Widget _buildUserNotFoundState() {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.person_off_outlined,
-            size: 80,
-            color: cs.onSurfaceVariant,
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'User Not Found',
-            style: theme.textTheme.headlineLarge?.copyWith(
-              color: cs.onSurface,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40),
-            child: Text(
-              'We couldn\'t find your user profile. Please try logging in again.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontSize: 15,
-                height: 1.5,
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-          ),
-          const SizedBox(height: 32),
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.of(context).pushReplacementNamed('/login');
-            },
-            icon: const Icon(Icons.login),
-            label: Text(
-              'Login',
-              style: theme.textTheme.titleLarge?.copyWith(
-                color: cs.onPrimary,
-              ),
-            ),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              backgroundColor: cs.primary,
-              foregroundColor: cs.onPrimary,
-              elevation: 0,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final step = OrderStatus.flow.indexOf(order.status).clamp(0, 3);
+    final color = _statusColor(order.status);
 
-  // Error state
-  Widget _buildErrorState(String errorMessage) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return Center(
-      child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 40),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+    return Column(
+      children: [
+        Row(
           children: [
-            Icon(
-              Icons.error_outline_rounded,
-              size: 80,
-              color: cs.error.withOpacity(0.8),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Oops!',
-              style: theme.textTheme.headlineLarge?.copyWith(
-                color: cs.onSurface,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Something went wrong while loading your orders',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w500,
-                color: cs.onSurface,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              errorMessage,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: cs.onSurfaceVariant,
-                height: 1.5,
-              ),
-            ),
-            const SizedBox(height: 32),
-            ElevatedButton.icon(
-              onPressed: () {
-                _refreshIndicatorKey.currentState?.show();
-                HapticFeedback.mediumImpact();
-              },
-              icon: const Icon(Icons.refresh_rounded),
-              label: Text(
-                'Try Again',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  color: cs.onPrimary,
+            for (var i = 0; i < 4; i++) ...[
+              TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0, end: i <= step ? 1 : 0),
+                duration: Duration(milliseconds: 300 + 120 * i),
+                curve: ZingMotion.emphasized,
+                builder: (_, t, __) => Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: Color.lerp(cs.surfaceContainerHighest, color, t),
+                    shape: BoxShape.circle,
+                    boxShadow: i == step
+                        ? [BoxShadow(color: color.withValues(alpha: 0.45 * t), blurRadius: 8)]
+                        : null,
+                  ),
                 ),
               ),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
+              if (i < 3)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(2),
+                      child: TweenAnimationBuilder<double>(
+                        tween: Tween(begin: 0, end: i < step ? 1 : 0),
+                        duration: Duration(milliseconds: 420 + 120 * i),
+                        curve: ZingMotion.emphasized,
+                        builder: (_, t, __) => LinearProgressIndicator(
+                          value: t,
+                          minHeight: 3,
+                          color: color,
+                          backgroundColor: cs.surfaceContainerHighest,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-                backgroundColor: cs.primary,
-                foregroundColor: cs.onPrimary,
-                elevation: 0,
-              ),
-            ),
+            ],
           ],
         ),
-      ),
-    );
-  }
-
-  // Empty state
-  Widget _buildEmptyState() {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return Center(
-      child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 40),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+        const SizedBox(height: 6),
+        Row(
           children: [
-            Icon(
-              Icons.shopping_bag_outlined,
-              size: 80,
-              color: cs.primary.withOpacity(0.6),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'No Orders Yet',
-              style: theme.textTheme.headlineLarge?.copyWith(
-                color: cs.onSurface,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'You haven\'t placed any orders yet. Start shopping to see your order history here!',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontSize: 15,
-                height: 1.5,
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 32),
-            ElevatedButton.icon(
-              onPressed: () {
-                // Navigate to home to shop
-                if (!widget.isRootTab) Navigator.pop(context);
-                HapticFeedback.mediumImpact();
-              },
-              icon: const Icon(Icons.shopping_cart_outlined),
-              label: Text(
-                'Start Shopping',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  color: cs.onPrimary,
-                ),
-              ),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                backgroundColor: cs.primary,
-                foregroundColor: cs.onPrimary,
-                elevation: 0,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Store error card
-  Widget _buildErrorCard(String orderId) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-        color: cs.error.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: cs.error.withOpacity(0.2),
-          width: 1,
-        ),
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: cs.error.withOpacity(0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.error_outline,
-              color: cs.error,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Order Error',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    color: cs.error,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Invalid store ID for order $orderId',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: cs.onSurface,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Main order list
-  Widget _buildOrderList(BuildContext context, List<Orders> orders, StoreProvider storeProvider) {
-    return AnimationLimiter(
-      child: ListView.builder(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        // +1 for the recommendations row at the bottom
-        itemCount: orders.length + 1,
-        physics: const BouncingScrollPhysics(),
-        itemBuilder: (context, index) {
-          // Last item: recommendations row
-          if (index == orders.length) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: RecommendedStoresRow(
-                placement: RecommendationProvider.postOrderStores,
-                sectionTitle: "More Stores You'll Love",
-              ),
-            );
-          }
-
-          final order = orders[index];
-
-          // Check if storeId is valid before fetching the store
-          if (order.storeId == null || order.storeId.isEmpty) {
-            print('Invalid storeId for order: ${order.id}');
-            return AnimationConfiguration.staggeredList(
-              position: index,
-              duration: const Duration(milliseconds: 500),
-              child: SlideAnimation(
-                verticalOffset: 50.0,
-                child: FadeInAnimation(
-                  child: _buildErrorCard(order.id),
-                ),
-              ),
-            );
-          }
-
-          return AnimationConfiguration.staggeredList(
-            position: index,
-            duration: const Duration(milliseconds: 500),
-            child: SlideAnimation(
-              verticalOffset: 50.0,
-              child: FadeInAnimation(
-                child: FutureBuilder<Store?>(
-                  future: storeProvider.getStoreById(order.storeId),
-                  builder: (context, storeSnapshot) {
-                    String storeName = 'Unknown Store';
-                    String storeImage = '';
-
-                    if (storeSnapshot.hasError) {
-                      storeName = 'Error fetching store';
-                      print('Error fetching store: ${storeSnapshot.error}');
-                    } else if (storeSnapshot.hasData && storeSnapshot.data != null) {
-                      storeName = storeSnapshot.data!.name;
-                      storeImage = storeSnapshot.data!.imageUrl;
-                    }
-
-                    return _buildOrderCard(context, order, storeName, storeImage);
-                  },
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  // Enhanced order card
-  Widget _buildOrderCard(BuildContext context, Orders order, String storeName, String storeImage) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    // Get appropriate status color
-    Color statusColor = _getStatusColor(order.status);
-    IconData statusIcon = _getStatusIcon(order.status);
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: ZingShadows.soft,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Order header
-          _buildEnhancedOrderHeader(order, storeName, storeImage, statusColor, statusIcon),
-
-          // Divider
-          Divider(
-            color: cs.outline.withOpacity(0.3),
-            thickness: 1,
-            height: 1,
-          ),
-
-          // Product list
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Items',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: cs.onSurface,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _buildEnhancedProductList(order.products),
-              ],
-            ),
-          ),
-
-          // Divider
-          Divider(
-            color: cs.outline.withOpacity(0.3),
-            thickness: 1,
-            height: 1,
-          ),
-
-          // Order footer
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: _buildEnhancedOrderFooter(order),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Enhanced order header
-  Widget _buildEnhancedOrderHeader(
-      Orders order,
-      String storeName,
-      String storeImage,
-      Color statusColor,
-      IconData statusIcon
-      ) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    final DateFormat dateFormatter = DateFormat.yMMMd();
-    final formattedDate = dateFormatter.format(order.placedAt.toDate());
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(16),
-          topRight: Radius.circular(16),
-        ),
-      ),
-      child: Row(
-        children: [
-          // Store image or placeholder
-          Container(
-            width: 50,
-            height: 50,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              color: cs.surfaceContainerHighest,
-              image: storeImage.isNotEmpty
-                  ? DecorationImage(
-                image: NetworkImage(storeImage),
-                fit: BoxFit.cover,
-              )
-                  : null,
-              boxShadow: ZingShadows.soft,
-            ),
-            child: storeImage.isEmpty
-                ? Icon(
-              Icons.store_rounded,
-              color: cs.onSurfaceVariant,
-              size: 24,
-            )
-                : null,
-          ),
-
-          const SizedBox(width: 16),
-
-          // Order details
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  storeName,
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    color: cs.onSurface,
-                  ),
+            for (var i = 0; i < 4; i++)
+              Expanded(
+                child: Text(
+                  OrderStatus.customerLabel(OrderStatus.flow[i], order.deliveryMethod),
+                  textAlign: i == 0 ? TextAlign.left : (i == 3 ? TextAlign.right : TextAlign.center),
+                  style: ZingType.style(11,
+                      weight: i == step ? FontWeight.w600 : FontWeight.w400,
+                      color: i <= step ? cs.onSurface : cs.onSurfaceVariant),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Order #${order.id.substring(0, Math.min(8, order.id.length))}',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: cs.onSurfaceVariant,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      formattedDate,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(width: 8),
-
-          // Status badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: statusColor.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  statusIcon,
-                  size: 14,
-                  color: statusColor,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  order.status,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: statusColor,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Enhanced product list
-  Widget _buildEnhancedProductList(List<Product> products) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return Column(
-      children: products.asMap().entries.map((entry) {
-        final index = entry.key;
-        final product = entry.value;
-
-        return Container(
-          margin: EdgeInsets.only(bottom: index < products.length - 1 ? 8 : 0),
-          child: Row(
-            children: [
-              // Product indicator
-              Container(
-                width: 6,
-                height: 6,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: cs.primary,
-                ),
               ),
-
-              const SizedBox(width: 8),
-
-              // Product name
-              Expanded(
-                child: Text(
-                  product.name,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w500,
-                    color: cs.onSurface,
-                  ),
-                ),
-              ),
-
-              const SizedBox(width: 8),
-
-            ],
-          ),
-        );
-      }).toList(),
-    );
-  }
-
-  // Enhanced order footer
-  Widget _buildEnhancedOrderFooter(Orders order) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return Column(
-      children: [
-        // Total
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'Total',
-              style: theme.textTheme.titleLarge?.copyWith(
-                color: cs.onSurface,
-              ),
-            ),
-            Text(
-              '\$${order.totalPrice.toStringAsFixed(2)}',
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-                color: cs.primary,
-              ),
-            ),
-          ],
-        ),
-
-        // Order actions
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            // Track order button (for orders in progress)
-            if (order.status != 'Delivered' && order.status != 'Cancelled')
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    // Navigate to order tracking
-                    HapticFeedback.mediumImpact();
-                  },
-                  icon: const Icon(Icons.location_on_outlined, size: 18),
-                  label: Text(
-                    'Track Order',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w500,
-                      color: cs.onPrimary,
-                    ),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: cs.primary,
-                    foregroundColor: cs.onPrimary,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-              ),
-
-            // Reorder button (for all orders)
-            Expanded(
-              child: order.status != 'Delivered' && order.status != 'Cancelled'
-                  ? Padding(
-                padding: const EdgeInsets.only(left: 12),
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    // Reorder functionality
-                    HapticFeedback.mediumImpact();
-                  },
-                  icon: const Icon(Icons.replay, size: 18),
-                  label: Text(
-                    'Reorder',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w500,
-                      color: cs.primary,
-                    ),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: cs.primary,
-                    side: BorderSide(color: cs.primary),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-              )
-                  : ElevatedButton.icon(
-                onPressed: () {
-                  // Reorder functionality
-                  HapticFeedback.mediumImpact();
-                },
-                icon: const Icon(Icons.replay, size: 18),
-                label: Text(
-                  'Reorder',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w500,
-                    color: cs.onPrimary,
-                  ),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: cs.primary,
-                  foregroundColor: cs.onPrimary,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-            ),
           ],
         ),
       ],
     );
   }
+}
 
-  // Helper method to get status color
-  Color _getStatusColor(String status) {
-    final cs = Theme.of(context).colorScheme;
-    switch (status.toLowerCase()) {
-      case 'delivered':
-        return ZingColors.success;
-      case 'processing':
-      case 'prepared':
-      case 'on the way':
-        return ZingColors.warning;
-      case 'cancelled':
-        return cs.error;
-      case 'pending':
-        return cs.tertiary;
-      default:
-        return cs.primary;
-    }
-  }
+class _StoreThumb extends StatelessWidget {
+  final String? url;
+  const _StoreThumb({this.url});
 
-  // Helper method to get status icon
-  IconData _getStatusIcon(String status) {
-    switch (status.toLowerCase()) {
-      case 'delivered':
-        return Icons.check_circle_outline;
-      case 'processing':
-        return Icons.hourglass_top;
-      case 'prepared':
-        return Icons.restaurant;
-      case 'on the way':
-        return Icons.delivery_dining;
-      case 'cancelled':
-        return Icons.cancel_outlined;
-      case 'pending':
-        return Icons.pending_outlined;
-      default:
-        return Icons.info_outline;
-    }
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: SizedBox(
+        width: 42,
+        height: 42,
+        child: (url ?? '').isEmpty
+            ? const ZingIconTile(icon: CupertinoIcons.bag_fill, color: ZingColors.primary, size: 42)
+            : CachedNetworkImage(
+                imageUrl: url!,
+                fit: BoxFit.cover,
+                errorWidget: (_, __, ___) =>
+                    const ZingIconTile(icon: CupertinoIcons.bag_fill, color: ZingColors.primary, size: 42),
+              ),
+      ),
+    );
   }
 }
 
-// Add this for the Math.min functionality
-class Math {
-  static int min(int a, int b) {
-    return a < b ? a : b;
+/// Full order: timeline, items, delivery details, totals, cancel.
+class _OrderDetailSheet extends StatefulWidget {
+  final Orders order;
+  final Store? store;
+  const _OrderDetailSheet({required this.order, this.store});
+
+  @override
+  State<_OrderDetailSheet> createState() => _OrderDetailSheetState();
+}
+
+class _OrderDetailSheetState extends State<_OrderDetailSheet> {
+  bool _cancelling = false;
+  bool _reordering = false;
+
+  /// Puts this order's items back in the bag at today's price, skipping
+  /// anything the store no longer sells or has run out of.
+  Future<void> _orderAgain() async {
+    final store = widget.store;
+    final cart = Provider.of<CartProvider>(context, listen: false);
+    if (store == null) {
+      showZingToast(context, 'This store is no longer available.', error: true);
+      return;
+    }
+    setState(() => _reordering = true);
+    var added = 0;
+    final skipped = <String>[];
+    for (final line in widget.order.lines) {
+      Product? current;
+      for (final p in store.products) {
+        if (p.id == line.productId) current = p;
+      }
+      if (current == null || !current.inStock) {
+        skipped.add(line.name);
+        continue;
+      }
+      final inBag = cart.items.where((i) => i.id == current!.id).fold<int>(0, (n, i) => n + i.quantity);
+      final units = line.quantity.clamp(0, current.quantity - inBag);
+      if (units <= 0) {
+        skipped.add(line.name);
+        continue;
+      }
+      final item = CartItem(
+        id: current.id,
+        name: current.name,
+        price: current.effectivePrice,
+        imageUrl: current.imageUrl,
+        storeId: store.id,
+        quantity: 1,
+      );
+      for (var i = 0; i < units; i++) {
+        if (!mounted) return;
+        await cart.addItem(item, context);
+      }
+      added += units;
+    }
+    if (!mounted) return;
+    setState(() => _reordering = false);
+    if (added == 0) {
+      showZingToast(context, 'None of these items are available right now.', error: true);
+      return;
+    }
+    Navigator.of(context).pop();
+    showZingToast(
+      context,
+      skipped.isEmpty
+          ? 'Added $added ${added == 1 ? 'item' : 'items'} to your bag'
+          : 'Added $added to your bag. Unavailable: ${skipped.join(', ')}',
+      icon: CupertinoIcons.bag_fill_badge_plus,
+    );
+  }
+
+  Future<void> _cancel() async {
+    final ok = await showZingAlert(
+      context,
+      title: 'Cancel this order?',
+      message: 'The store will be told straight away. This can’t be undone.',
+      confirmLabel: 'Cancel Order',
+      cancelLabel: 'Keep Order',
+      destructive: true,
+    );
+    if (!ok || !mounted) return;
+    setState(() => _cancelling = true);
+    try {
+      await Provider.of<OrderProvider>(context, listen: false).cancelOrderAsCustomer(widget.order);
+      if (!mounted) return;
+      showZingToast(context, 'Order cancelled');
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _cancelling = false);
+      showZingToast(context, 'Could not cancel: the store may have started on it.', error: true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final order = widget.order;
+    final fmt = DateFormat('d MMM, h:mm a');
+    final cancelled = order.status == OrderStatus.cancelled;
+    final steps = cancelled
+        ? [OrderStatus.pending, OrderStatus.cancelled]
+        : OrderStatus.flow;
+    final current = steps.indexOf(order.status);
+    final subtotal = order.totalPrice - order.deliveryFee;
+
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.75,
+      maxChildSize: 0.95,
+      builder: (context, scroll) => ColoredBox(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: ListView(
+          controller: scroll,
+          padding: const EdgeInsets.only(bottom: 32),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(order.storeName.isNotEmpty ? order.storeName : 'Order',
+                      style: ZingType.title2(cs.onSurface)),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Order #${order.id.length > 6 ? order.id.substring(0, 6).toUpperCase() : order.id} · ${fmt.format(order.placedAt.toDate())}',
+                    style: ZingType.footnote(cs.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+            ZingGroupedSection(
+              header: 'Status',
+              separatorIndent: 16,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < steps.length; i++)
+                        _TimelineRow(
+                          label: OrderStatus.customerLabel(steps[i], order.deliveryMethod),
+                          time: order.reachedAt(steps[i]) == null
+                              ? null
+                              : fmt.format(order.reachedAt(steps[i])!.toDate()),
+                          done: i <= current,
+                          current: i == current,
+                          color: _statusColor(order.status),
+                          last: i == steps.length - 1,
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            ZingGroupedSection(
+              header: '${order.itemCount} ${order.itemCount == 1 ? 'item' : 'items'}',
+              separatorIndent: 16,
+              children: [
+                for (final line in order.lines)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    child: Row(
+                      children: [
+                        Text('${line.quantity}×', style: ZingType.body(cs.onSurfaceVariant)),
+                        const SizedBox(width: 10),
+                        Expanded(child: Text(line.name, style: ZingType.body(cs.onSurface))),
+                        Text(_money(line.total), style: ZingType.body(cs.onSurface)),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+            ZingGroupedSection(
+              header: order.isHomeDelivery ? 'Delivery' : 'Pickup',
+              children: [
+                ZingListRow(
+                  icon: order.isHomeDelivery ? CupertinoIcons.car_detailed : CupertinoIcons.bag_fill,
+                  iconColor: order.isHomeDelivery ? ZingColors.success : ZingColors.warning,
+                  title: order.isHomeDelivery ? 'Home Delivery' : 'Collect from store',
+                  subtitle: order.isHomeDelivery
+                      ? (order.deliveryAddress ?? 'No address recorded')
+                      : widget.store?.name,
+                ),
+              ],
+            ),
+            ZingGroupedSection(
+              header: 'Payment',
+              footer: 'Pay the store in cash when you ${order.isHomeDelivery ? 'receive' : 'collect'} your order.',
+              separatorIndent: 16,
+              children: [
+                _amountRow(context, 'Subtotal', subtotal),
+                if (order.deliveryFee > 0) _amountRow(context, 'Delivery', order.deliveryFee),
+                _amountRow(context, 'Total', order.totalPrice, bold: true),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+              child: ZingButton(
+                label: 'Order Again',
+                icon: CupertinoIcons.arrow_2_circlepath,
+                loading: _reordering,
+                onPressed: _orderAgain,
+              ),
+            ),
+            if (order.canCustomerCancel)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                child: ZingButton(
+                  label: 'Cancel Order',
+                  tinted: true,
+                  destructive: true,
+                  loading: _cancelling,
+                  onPressed: _cancel,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _amountRow(BuildContext context, String label, double amount, {bool bold = false}) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Expanded(child: Text(label, style: bold ? ZingType.headline(cs.onSurface) : ZingType.body(cs.onSurface))),
+          Text(_money(amount), style: bold ? ZingType.headline(cs.onSurface) : ZingType.body(cs.onSurfaceVariant)),
+        ],
+      ),
+    );
+  }
+}
+
+class _TimelineRow extends StatelessWidget {
+  final String label;
+  final String? time;
+  final bool done;
+  final bool current;
+  final bool last;
+  final Color color;
+
+  const _TimelineRow({
+    required this.label,
+    required this.time,
+    required this.done,
+    required this.current,
+    required this.last,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final dot = done ? color : cs.surfaceContainerHighest;
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: 22,
+            child: Column(
+              children: [
+                Container(
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    color: dot,
+                    shape: BoxShape.circle,
+                    border: current ? Border.all(color: color.withValues(alpha: 0.3), width: 3) : null,
+                  ),
+                  child: done && !current
+                      ? const Icon(CupertinoIcons.checkmark, size: 9, color: Colors.white)
+                      : null,
+                ),
+                if (!last)
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      margin: const EdgeInsets.symmetric(vertical: 2),
+                      color: done ? color.withValues(alpha: 0.5) : cs.surfaceContainerHighest,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: ZingType.body(done ? cs.onSurface : cs.onSurfaceVariant)
+                          .copyWith(fontWeight: current ? FontWeight.w600 : FontWeight.w400, height: 1),
+                    ),
+                  ),
+                  if (time != null) Text(time!, style: ZingType.footnote(cs.onSurfaceVariant)),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Message extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String body;
+  final (String, VoidCallback)? action;
+
+  const _Message({required this.icon, required this.title, required this.body, this.action});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return ZingReveal(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(40, 48, 40, 24),
+        child: Column(
+          children: [
+            Icon(icon, size: 48, color: cs.onSurfaceVariant.withValues(alpha: 0.45)),
+            const SizedBox(height: 14),
+            Text(title, style: ZingType.title3(cs.onSurface), textAlign: TextAlign.center),
+            const SizedBox(height: 6),
+            Text(body, style: ZingType.subhead(cs.onSurfaceVariant), textAlign: TextAlign.center),
+            if (action != null) ...[
+              const SizedBox(height: 20),
+              ZingButton(label: action!.$1, onPressed: action!.$2),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }

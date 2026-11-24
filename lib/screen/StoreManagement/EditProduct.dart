@@ -16,10 +16,10 @@ class EditProductScreen extends StatefulWidget {
   final Product? product;
   final String storeId;
 
-  EditProductScreen({this.product, required this.storeId});
+  const EditProductScreen({super.key, this.product, required this.storeId});
 
   @override
-  _EditProductScreenState createState() => _EditProductScreenState();
+  State<EditProductScreen> createState() => _EditProductScreenState();
 }
 
 class _EditProductScreenState extends State<EditProductScreen> {
@@ -36,6 +36,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
   bool _isProcessing = false; // New state for form submission
   String? _uploadedImageUrl;
   bool _imageError = false; // Track image validation
+  bool _isAvailable = true; // Owner can hide a product without deleting it
 
   @override
   void initState() {
@@ -46,6 +47,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
     ratingController = TextEditingController(text: widget.product?.rating?.toString() ?? '');
     quantityController = TextEditingController(text: widget.product?.quantity.toString() ?? '0');
     _uploadedImageUrl = widget.product?.imageUrl;
+    _isAvailable = widget.product?.isAvailable ?? true;
   }
 
   @override
@@ -120,11 +122,11 @@ class _EditProductScreenState extends State<EditProductScreen> {
   Future<void> _showImageSourceDialog() async {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final BuildContext currentContext = this.context; // Store the current context
+    final BuildContext currentContext = context; // Store the current context
     await showModalBottomSheet(
       context: currentContext, // Use the stored context
       backgroundColor: cs.surface,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (BuildContext context) {
@@ -141,7 +143,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                SizedBox(height: 20),
+                const SizedBox(height: 20),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
@@ -163,7 +165,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
                     ),
                   ],
                 ),
-                SizedBox(height: 20),
+                const SizedBox(height: 20),
               ],
             ),
           ),
@@ -186,14 +188,14 @@ class _EditProductScreenState extends State<EditProductScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            padding: EdgeInsets.all(15),
+            padding: const EdgeInsets.all(15),
             decoration: BoxDecoration(
-              color: cs.primary.withOpacity(0.1),
+              color: cs.primary.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: cs.primary, size: 30),
           ),
-          SizedBox(height: 8),
+          const SizedBox(height: 8),
           Text(
             label,
             style: theme.textTheme.bodyMedium!.copyWith(
@@ -230,19 +232,19 @@ class _EditProductScreenState extends State<EditProductScreen> {
         _isUploading = false;
       });
       _showErrorSnackBar('Failed to upload image: ${e.toString()}');
-      throw e;
+      rethrow;
     }
   }
 
   void _showErrorSnackBar(String message) {
     final cs = Theme.of(context).colorScheme;
-    final BuildContext currentContext = this.context; // Store the current context
+    final BuildContext currentContext = context; // Store the current context
     ScaffoldMessenger.of(currentContext).showSnackBar(
       SnackBar(
         content: Row(
           children: [
             Icon(Icons.error_outline, color: cs.onPrimary),
-            SizedBox(width: 8),
+            const SizedBox(width: 8),
             Expanded(child: Text(message)),
           ],
         ),
@@ -255,13 +257,13 @@ class _EditProductScreenState extends State<EditProductScreen> {
 
   void _showSuccessSnackBar(String message) {
     final cs = Theme.of(context).colorScheme;
-    final BuildContext currentContext = this.context; // Store the current context
+    final BuildContext currentContext = context; // Store the current context
     ScaffoldMessenger.of(currentContext).showSnackBar(
       SnackBar(
         content: Row(
           children: [
             Icon(Icons.check_circle_outline, color: cs.onPrimary),
-            SizedBox(width: 8),
+            const SizedBox(width: 8),
             Expanded(child: Text(message)),
           ],
         ),
@@ -276,8 +278,6 @@ class _EditProductScreenState extends State<EditProductScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final storeProvider = Provider.of<StoreProvider>(context, listen: false);
-    final userProvider = Provider.of<CustomUserProvider>(context, listen: false);
     final isEditing = widget.product != null;
     final actionText = isEditing ? 'Update' : 'Create';
 
@@ -287,20 +287,20 @@ class _EditProductScreenState extends State<EditProductScreen> {
         appBar: AppBar(
           title: Text(
             isEditing ? 'Edit Product' : 'Add New Product',
-            style: TextStyle(fontWeight: FontWeight.w600),
+            style: const TextStyle(fontWeight: FontWeight.w600),
           ),
           backgroundColor: cs.surface,
           foregroundColor: cs.primary,
           elevation: 0,
           centerTitle: true,
           leading: IconButton(
-            icon: Icon(Icons.arrow_back_ios_new, size: 20),
+            icon: const Icon(Icons.arrow_back_ios_new, size: 20),
             onPressed: () => Navigator.pop(context),
           ),
           actions: [
             if (isEditing)
               IconButton(
-                icon: Icon(Icons.delete_outline),
+                icon: const Icon(Icons.delete_outline),
                 onPressed: () {
                   _showDeleteConfirmation(context);
                 },
@@ -317,7 +317,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   SpinKitPulse(color: cs.primary, size: 50),
-                  SizedBox(height: 20),
+                  const SizedBox(height: 20),
                   Text(
                     isEditing ? 'Updating Product...' : 'Creating Product...',
                     style: theme.textTheme.titleMedium!.copyWith(
@@ -336,7 +336,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
                   children: [
                     // Image section
                     _buildImageSection(),
-                    SizedBox(height: 24),
+                    const SizedBox(height: 24),
 
                     // Product information card
                     _buildInfoCard(
@@ -355,7 +355,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
                               return null;
                             },
                           ),
-                          SizedBox(height: 16),
+                          const SizedBox(height: 16),
                           Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -364,7 +364,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
                                   controller: priceController,
                                   label: 'Price',
                                   icon: Icons.attach_money,
-                                  keyboardType: TextInputType.numberWithOptions(decimal: true),
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                   inputFormatters: [
                                     FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
                                   ],
@@ -380,13 +380,13 @@ class _EditProductScreenState extends State<EditProductScreen> {
                                   },
                                 ),
                               ),
-                              SizedBox(width: 16),
+                              const SizedBox(width: 16),
                               Expanded(
                                 child: _buildFormField(
                                   controller: ratingController,
                                   label: 'Rating (0-5)',
                                   icon: Icons.star_outline,
-                                  keyboardType: TextInputType.numberWithOptions(decimal: true),
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                   inputFormatters: [
                                     FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,1}')),
                                   ],
@@ -403,7 +403,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
                               ),
                             ],
                           ),
-                          SizedBox(height: 16),
+                          const SizedBox(height: 16),
                           _buildFormField(
                             controller: quantityController,
                             label: 'Quantity',
@@ -423,11 +423,21 @@ class _EditProductScreenState extends State<EditProductScreen> {
                               return null;
                             },
                           ),
+                          const SizedBox(height: 8),
+                          SwitchListTile.adaptive(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Available for sale'),
+                            subtitle: Text(_isAvailable
+                                ? 'Customers can buy this product while stock lasts'
+                                : 'Hidden from sale (shown as unavailable)'),
+                            value: _isAvailable,
+                            onChanged: (value) => setState(() => _isAvailable = value),
+                          ),
                         ],
                       ),
                     ),
 
-                    SizedBox(height: 20),
+                    const SizedBox(height: 20),
 
                     // Description card
                     _buildInfoCard(
@@ -449,13 +459,13 @@ class _EditProductScreenState extends State<EditProductScreen> {
                       ),
                     ),
 
-                    SizedBox(height: 36),
+                    const SizedBox(height: 36),
 
                     // Submit button
                     ElevatedButton(
                       onPressed: _isUploading ? null : _submitForm,
                       style: ElevatedButton.styleFrom(
-                        minimumSize: Size(double.infinity, 50),
+                        minimumSize: const Size(double.infinity, 50),
                         backgroundColor: cs.primary,
                         foregroundColor: cs.onPrimary,
                         elevation: 0,
@@ -467,14 +477,14 @@ class _EditProductScreenState extends State<EditProductScreen> {
                         _isUploading
                             ? 'Uploading Image...'
                             : '$actionText Product',
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
                           letterSpacing: 0.5,
                         ),
                       ),
                     ),
-                    SizedBox(height: 20),
+                    const SizedBox(height: 20),
                   ],
                 ),
               ),
@@ -487,7 +497,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
 
   void _submitForm() async {
     // Store the current context to avoid conflicts
-    final BuildContext currentContext = this.context;
+    final BuildContext currentContext = context;
 
     // Get the providers that we'll need
     final storeProvider = Provider.of<StoreProvider>(currentContext, listen: false);
@@ -539,7 +549,8 @@ class _EditProductScreenState extends State<EditProductScreen> {
             description: description,
             rating: rating,
             imageUrl: imageUrlToUse,
-            isAvailable: widget.product!.isAvailable,
+            isAvailable: _isAvailable,
+            discount: widget.product!.discount, // keep existing discount
             quantity: quantity,
           ),
           userProvider,
@@ -548,6 +559,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
         _showSuccessSnackBar('Product updated successfully');
       } else {
         // Add new product
+        if (!currentContext.mounted) return;
         await storeProvider.addProduct(
           widget.storeId,
           Product(
@@ -557,6 +569,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
             description: description,
             rating: rating,
             imageUrl: imageUrlToUse,
+            isAvailable: _isAvailable,
             quantity: quantity,
           ),
           userProvider,
@@ -567,7 +580,8 @@ class _EditProductScreenState extends State<EditProductScreen> {
       }
 
       // Short delay to show the success message before closing
-      await Future.delayed(Duration(milliseconds: 800));
+      await Future.delayed(const Duration(milliseconds: 800));
+      if (!currentContext.mounted) return;
       Navigator.of(currentContext).pop(); // Return to the previous screen
     } catch (e) {
       setState(() {
@@ -590,13 +604,13 @@ class _EditProductScreenState extends State<EditProductScreen> {
             fontWeight: FontWeight.w600,
           ),
         ),
-        SizedBox(height: 12),
+        const SizedBox(height: 12),
         GestureDetector(
           onTap: _showImageSourceDialog,
           child: Center(
             child: Column(
               children: [
-                Container(
+                SizedBox(
                   height: 180,
                   width: 180,
                   child: _selectedImage != null
@@ -605,7 +619,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
                       ? _buildNetworkImagePreview(_uploadedImageUrl!)
                       : _buildImagePlaceholder(),
                 ),
-                SizedBox(height: 8),
+                const SizedBox(height: 8),
                 if (_imageError)
                   Text(
                     'Please select an image',
@@ -699,7 +713,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
         width: double.infinity,
         height: double.infinity,
         decoration: BoxDecoration(
-          color: _imageError ? cs.error.withOpacity(0.05) : cs.surfaceContainerHighest,
+          color: _imageError ? cs.error.withValues(alpha: 0.05) : cs.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
@@ -708,9 +722,9 @@ class _EditProductScreenState extends State<EditProductScreen> {
             Icon(
               isError ? Icons.error_outline : Icons.add_a_photo,
               size: 36,
-              color: _imageError ? cs.error.withOpacity(0.6) : cs.onSurfaceVariant,
+              color: _imageError ? cs.error.withValues(alpha: 0.6) : cs.onSurfaceVariant,
             ),
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
             Text(
               isError ? 'Failed to load image' : 'Tap to add image',
               style: theme.textTheme.bodyMedium!.copyWith(
@@ -733,9 +747,9 @@ class _EditProductScreenState extends State<EditProductScreen> {
     return InkWell(
       onTap: onTap,
       child: Container(
-        padding: EdgeInsets.all(6),
+        padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
-          color: cs.surface.withOpacity(0.9),
+          color: cs.surface.withValues(alpha: 0.9),
           shape: BoxShape.circle,
           boxShadow: ZingShadows.soft,
         ),
@@ -768,7 +782,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
           ),
         ),
         Container(
-          padding: EdgeInsets.all(16),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: cs.surface,
             borderRadius: BorderRadius.circular(12),
@@ -837,7 +851,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(color: cs.error, width: 1.5),
         ),
-        errorStyle: TextStyle(
+        errorStyle: const TextStyle(
           fontSize: 12,
         ),
       ),
@@ -855,7 +869,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
       context: context,
       builder: (BuildContext dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
+        title: const Row(
           children: [
             Icon(Icons.warning_amber_rounded, color: ZingColors.warning),
             SizedBox(width: 8),
@@ -889,10 +903,12 @@ class _EditProductScreenState extends State<EditProductScreen> {
 
                 // Store context before async operation
                 final BuildContext currentContext = this.context;
+                if (!currentContext.mounted) return;
                 ScaffoldMessenger.of(currentContext).showSnackBar(
-                  SnackBar(content: Text('Product deleted successfully')),
+                  const SnackBar(content: Text('Product deleted successfully')),
                 );
 
+                if (!currentContext.mounted) return;
                 Navigator.pop(currentContext); // Return to product list
               } catch (e) {
                 setState(() {
@@ -907,7 +923,7 @@ class _EditProductScreenState extends State<EditProductScreen> {
                 borderRadius: BorderRadius.circular(8),
               ),
             ),
-            child: Text('Delete'),
+            child: const Text('Delete'),
           ),
         ],
       ),
