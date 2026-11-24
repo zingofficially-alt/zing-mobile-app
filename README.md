@@ -40,6 +40,8 @@ SQL lives in `supabase/migrations` and is applied in order:
 | `0003_order_delivery.sql` | Delivery fee/address, storage policies |
 | `0004_order_rules.sql` | `place_order()`, order status rules and history, stock reservation, order notifications, store opening hours |
 | `0005_store_expiry.sql` | `expire_store_access()` (daily, pg_cron) and re-activation on payment |
+| `0006_privacy_and_uploads.sql` | Profiles readable only by people you trade or chat with, `store_owner_info()`, per-bucket upload rules |
+| `0007_close_remaining_gaps.sql` | Only approved Owners can create stores, only admins change `is_active` or delete orders, notifications can only be marked read |
 
 Apply one with the Supabase CLI, or `node server/scripts/db-apply.js supabase/migrations/0004_order_rules.sql`.
 
