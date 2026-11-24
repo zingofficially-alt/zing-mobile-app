@@ -48,6 +48,26 @@ class CustomUser {
     this.payments = const [],
   });
 
+  bool get isAdmin => role == 'Admin';
+  bool get isOwner => role == 'Owner';
+
+  /// Store access lasts this many days after each registration payment.
+  static const int accessDays = 30;
+
+  /// Whole days of store access left (0 when it has run out), or null when
+  /// no payment is loaded for this account. Based on the latest payment.
+  int? subscriptionDaysLeft([DateTime? now]) {
+    final list = payments;
+    if (list == null || list.isEmpty) return null;
+    final latest = list
+        .map((p) => p.paymentDate.toDate())
+        .reduce((a, b) => a.isAfter(b) ? a : b);
+    final remaining =
+        latest.add(const Duration(days: accessDays)).difference(now ?? DateTime.now());
+    if (remaining.isNegative) return 0;
+    return (remaining.inMinutes / (24 * 60)).ceil();
+  }
+
   void addFavorite(String storeId) {
     if (!favorites!.contains(storeId)) {
       favorites!.add(storeId);
@@ -141,6 +161,137 @@ class CustomUser {
   }
 }
 
+/// Opening and closing time for one weekday, in minutes after midnight.
+class DayHours {
+  final bool closed;
+  final int open;
+  final int close;
+
+  const DayHours({this.closed = false, this.open = 9 * 60, this.close = 18 * 60});
+
+  /// Same opening and closing time means open around the clock.
+  bool get isAllDay => !closed && open == close;
+
+  /// Closing time earlier than opening time means it closes after midnight.
+  bool get isOvernight => !closed && close < open;
+
+  DayHours copyWith({bool? closed, int? open, int? close}) => DayHours(
+        closed: closed ?? this.closed,
+        open: open ?? this.open,
+        close: close ?? this.close,
+      );
+
+  Map<String, dynamic> toMap() => {
+        'closed': closed,
+        'open': _toClock(open),
+        'close': _toClock(close),
+      };
+
+  static DayHours fromMap(dynamic raw) {
+    if (raw is! Map) return const DayHours(closed: true);
+    return DayHours(
+      closed: raw['closed'] == true,
+      open: _fromClock(raw['open']) ?? 9 * 60,
+      close: _fromClock(raw['close']) ?? 18 * 60,
+    );
+  }
+
+  static String _toClock(int minutes) =>
+      '${(minutes ~/ 60).toString().padLeft(2, '0')}:${(minutes % 60).toString().padLeft(2, '0')}';
+
+  static int? _fromClock(dynamic value) {
+    if (value is! String) return null;
+    final parts = value.split(':');
+    if (parts.length != 2) return null;
+    final h = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    if (h == null || m == null || h < 0 || h > 23 || m < 0 || m > 59) return null;
+    return h * 60 + m;
+  }
+
+  /// "9:00 AM" style label for [minutes] after midnight.
+  static String label(int minutes) {
+    final h24 = (minutes ~/ 60) % 24;
+    final m = minutes % 60;
+    final suffix = h24 < 12 ? 'AM' : 'PM';
+    final h12 = h24 % 12 == 0 ? 12 : h24 % 12;
+    return '$h12:${m.toString().padLeft(2, '0')} $suffix';
+  }
+}
+
+/// Whether a store is open at a given moment, with a short label to show.
+class StoreOpenStatus {
+  final bool isOpen;
+  final String label;
+  const StoreOpenStatus(this.isOpen, this.label);
+}
+
+/// A store's weekly opening hours (the `stores.opening_hours` jsonb column).
+class OpeningHours {
+  static const dayKeys = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  static const dayNames = [
+    'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
+  ];
+  static const _shortNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  /// One entry per weekday, Monday first.
+  final List<DayHours> days;
+
+  OpeningHours(List<DayHours> days)
+      : assert(days.length == 7),
+        days = List.unmodifiable(days);
+
+  /// Monday to Saturday 9 AM to 6 PM, closed on Sunday.
+  factory OpeningHours.standard() => OpeningHours([
+        for (int i = 0; i < 6; i++) const DayHours(),
+        const DayHours(closed: true),
+      ]);
+
+  static OpeningHours? fromMap(dynamic raw) {
+    if (raw is! Map || raw.isEmpty) return null;
+    return OpeningHours([for (final key in dayKeys) DayHours.fromMap(raw[key])]);
+  }
+
+  Map<String, dynamic> toMap() => {
+        for (int i = 0; i < 7; i++) dayKeys[i]: days[i].toMap(),
+      };
+
+  OpeningHours withDay(int index, DayHours hours) =>
+      OpeningHours([for (int i = 0; i < 7; i++) i == index ? hours : days[i]]);
+
+  StoreOpenStatus statusAt(DateTime now) {
+    final t = now.hour * 60 + now.minute;
+    final i = now.weekday - 1; // DateTime.monday == 1
+    final today = days[i];
+    final yesterday = days[(i + 6) % 7];
+
+    // Still inside yesterday's after-midnight hours.
+    if (yesterday.isOvernight && t < yesterday.close) {
+      return StoreOpenStatus(true, 'Open · closes ${DayHours.label(yesterday.close)}');
+    }
+    if (!today.closed) {
+      if (today.isAllDay) return const StoreOpenStatus(true, 'Open 24 hours');
+      final openNow = today.isOvernight
+          ? t >= today.open
+          : (t >= today.open && t < today.close);
+      if (openNow) {
+        return StoreOpenStatus(true, 'Open · closes ${DayHours.label(today.close)}');
+      }
+      if (t < today.open) {
+        return StoreOpenStatus(false, 'Closed · opens ${DayHours.label(today.open)}');
+      }
+    }
+    for (int d = 1; d <= 7; d++) {
+      final next = days[(i + d) % 7];
+      if (next.closed) continue;
+      final day = d == 1 ? 'tomorrow' : _shortNames[(i + d) % 7];
+      final time = next.isAllDay ? '' : ' ${DayHours.label(next.open)}';
+      return StoreOpenStatus(false, 'Closed · opens $day$time');
+    }
+    return const StoreOpenStatus(false, 'Closed');
+  }
+}
+
 class Store {
   String? id; // Store unique ID (uuid)
   double? registrationsAmount;
@@ -159,6 +310,19 @@ class Store {
   List<String>? deliveryOptions;
   double? deliveryCost;
 
+  /// False hides the store from customers (`stores.is_active`).
+  bool isActive;
+
+  /// Weekly opening hours set by the owner; null when never set.
+  OpeningHours? openingHours;
+
+  /// Owner switch to close the store for now regardless of the hours.
+  bool temporarilyClosed;
+
+  /// Average and count of [ratings], worked out when the store is loaded.
+  double? ratingAvg;
+  int? ratingCount;
+
   Store({
     required this.phoneNumber,
     this.id,
@@ -176,7 +340,20 @@ class Store {
     this.videos = const [],
     this.deliveryOptions = const [],
     this.deliveryCost,
+    this.isActive = true,
+    this.openingHours,
+    this.temporarilyClosed = false,
+    this.ratingAvg,
+    this.ratingCount,
   });
+
+  /// Open/closed right now, or null when the owner has not set any hours.
+  StoreOpenStatus? openStatus([DateTime? now]) {
+    if (temporarilyClosed) {
+      return const StoreOpenStatus(false, 'Temporarily closed');
+    }
+    return openingHours?.statusAt(now ?? DateTime.now());
+  }
 
   Future<double> getAverageRating() async {
     if (id == null || id!.isEmpty) return 0.0;
@@ -238,20 +415,31 @@ class Store {
         'registration_amount': registrationsAmount,
         'delivery_options': deliveryOptions ?? [],
         'delivery_cost': deliveryCost,
+        // opening_hours, temporarily_closed and is_active are left out on
+        // purpose: screens that rebuild a Store to save it would wipe them.
+        // StoreProvider.updateStoreHours writes the hours.
       };
 
   /// Builds a store from a row loaded with [kStoreSelect].
   static Store fromRow(Map<String, dynamic> r) {
     final ownerRow = (r['owner'] as Map<String, dynamic>?) ?? const {};
+    final ratings = ((r['store_ratings'] as List?) ?? [])
+        .map((m) => Rating.fromRow(m as Map<String, dynamic>))
+        .toList();
     return Store(
+      isActive: r['is_active'] ?? true,
+      openingHours: OpeningHours.fromMap(r['opening_hours']),
+      temporarilyClosed: r['temporarily_closed'] ?? false,
+      ratingCount: ratings.length,
+      ratingAvg: ratings.isEmpty
+          ? null
+          : ratings.fold<double>(0, (s, x) => s + x.score) / ratings.length,
       id: r['id'],
       phoneNumber: r['phone_number'] ?? '',
       name: r['name'] ?? '',
       registrationsAmount: _num(r['registration_amount']),
       description: r['description'] ?? '',
-      ratings: ((r['store_ratings'] as List?) ?? [])
-          .map((m) => Rating.fromRow(m as Map<String, dynamic>))
-          .toList(),
+      ratings: ratings,
       category: r['category'] ?? '',
       imageUrl: _sanitizeImageUrl(r['image_url']),
       products: ((r['products'] as List?) ?? [])
@@ -325,6 +513,9 @@ class Payment {
 }
 
 class Product {
+  /// Stock at or below this count is flagged to the store owner.
+  static const int lowStockThreshold = 5;
+
   String id = '';
   final String name;
   final String? description;
@@ -346,6 +537,18 @@ class Product {
     this.discount,
     this.quantity = 0,
   });
+
+  /// A product can be bought only when the owner marked it available and
+  /// there is stock left.
+  bool get inStock => isAvailable && quantity > 0;
+
+  /// On sale but nearly gone: worth restocking.
+  bool get lowStock => isAvailable && quantity > 0 && quantity <= lowStockThreshold;
+
+  /// Price after the discount percentage, if any.
+  double get effectivePrice => (discount != null && discount! > 0)
+      ? price * (1 - discount! / 100)
+      : price;
 
   /// Columns of the `products` table.
   Map<String, dynamic> toRow(String storeId) => {
@@ -460,35 +663,164 @@ class Rating {
 /// Placeholder kept for the unused `Store.orders` field.
 class Order {}
 
+/// The steps an order moves through. The store owner advances the status;
+/// the customer may cancel only while it is still [pending] (enforced by the
+/// `guard_order_update` trigger).
+class OrderStatus {
+  OrderStatus._();
+
+  static const pending = 'Pending';
+  static const processed = 'Processed';
+  static const shipped = 'Shipped';
+  static const delivered = 'Delivered';
+  static const cancelled = 'Cancelled';
+
+  /// The normal path, in order.
+  static const flow = [pending, processed, shipped, delivered];
+
+  static const all = [...flow, cancelled];
+
+  static bool isFinal(String status) => status == delivered || status == cancelled;
+
+  /// The next step after [status], or null when there is none.
+  static String? next(String status) {
+    final i = flow.indexOf(status);
+    return (i >= 0 && i < flow.length - 1) ? flow[i + 1] : null;
+  }
+
+  /// True when the store may move an order from [from] to [to].
+  static bool canMove(String from, String to) {
+    if (from == to || isFinal(from)) return false;
+    if (to == cancelled) return true;
+    return next(from) == to;
+  }
+
+  /// Wording shown to the customer, which depends on how they get the order.
+  static String customerLabel(String status, String deliveryMethod) {
+    final pickup = deliveryMethod.toLowerCase().contains('pickup');
+    switch (status) {
+      case pending:
+        return 'Order placed';
+      case processed:
+        return 'Being prepared';
+      case shipped:
+        return pickup ? 'Ready for pickup' : 'Out for delivery';
+      case delivered:
+        return pickup ? 'Collected' : 'Delivered';
+      case cancelled:
+        return 'Cancelled';
+      default:
+        return status;
+    }
+  }
+}
+
+/// One product in an order with the number of units ordered.
+class OrderLine {
+  final String productId;
+  final String name;
+  final double unitPrice;
+  final int quantity;
+  final String? imageUrl;
+
+  const OrderLine({
+    required this.productId,
+    required this.name,
+    required this.unitPrice,
+    required this.quantity,
+    this.imageUrl,
+  });
+
+  double get total => unitPrice * quantity;
+}
+
+/// One entry in an order's status history (`order_status_history`).
+class OrderStatusChange {
+  final String status;
+  final Timestamp at;
+  const OrderStatusChange(this.status, this.at);
+}
+
 class Orders {
   String id;
   String userId;
   String storeId;
+  String storeName;
+
+  /// Line items. Each row's [Product.quantity] is the number of units
+  /// ordered (the cart writes one row per unit). Use [lines] for a summary.
   List<Product> products;
-  double totalPrice;
-  String status; // Pending, Processed, Shipped, Delivered
+  double totalPrice; // Includes the delivery fee
+  double deliveryFee;
+  String? deliveryAddress;
+  String status; // See [OrderStatus]
   Timestamp placedAt;
   String deliveryMethod;
   CustomUser? userDetails;
   Store? storeDetails;
+  List<OrderStatusChange> statusHistory;
+
+  /// 'customer' or 'store' when the order was cancelled.
+  String? cancelledBy;
 
   Orders({
     this.id = '',
     required this.userId,
     required this.storeId,
+    this.storeName = '',
     required this.products,
     required this.totalPrice,
-    this.status = 'Pending',
+    this.deliveryFee = 0.0,
+    this.deliveryAddress,
+    this.status = OrderStatus.pending,
     required this.placedAt,
     required this.deliveryMethod,
     this.userDetails,
     this.storeDetails,
+    this.statusHistory = const [],
+    this.cancelledBy,
   });
 
-  /// Select string for loading an order with its line items and buyer.
+  /// Select string for loading an order with its line items, buyer, store
+  /// name and status history.
   static const String select =
       '*, order_items(*), buyer:profiles!user_id(id, name, email, phone_number, '
-      'address, profile_image_url, role)';
+      'address, profile_image_url, role), store:stores(name, image_url), '
+      'order_status_history(status, changed_at)';
+
+  static int _units(Product p) => p.quantity > 0 ? p.quantity : 1;
+
+  /// Products grouped by item, with the number of units of each.
+  List<OrderLine> get lines {
+    final byKey = <String, OrderLine>{};
+    for (final product in products) {
+      final key = product.id.isNotEmpty ? product.id : product.name;
+      final existing = byKey[key];
+      byKey[key] = OrderLine(
+        productId: product.id,
+        name: product.name,
+        unitPrice: product.price,
+        quantity: (existing?.quantity ?? 0) + _units(product),
+        imageUrl: product.imageUrl,
+      );
+    }
+    return byKey.values.toList();
+  }
+
+  int get itemCount => products.fold(0, (sum, p) => sum + _units(p));
+
+  bool get isHomeDelivery => deliveryMethod.toLowerCase().contains('delivery');
+
+  /// Customers can cancel only before the store starts on the order.
+  bool get canCustomerCancel => status == OrderStatus.pending;
+
+  /// When the order reached [status], if recorded.
+  Timestamp? reachedAt(String status) {
+    for (final change in statusHistory.reversed) {
+      if (change.status == status) return change.at;
+    }
+    return status == OrderStatus.pending ? placedAt : null;
+  }
 
   /// Columns of the `orders` table (line items are written to `order_items`).
   Map<String, dynamic> toRow() => {
@@ -514,10 +846,23 @@ class Orders {
   /// Builds an order from a row loaded with [Orders.select].
   factory Orders.fromRow(Map<String, dynamic> r) {
     final buyer = r['buyer'] as Map<String, dynamic>?;
+    final store = r['store'] as Map<String, dynamic>?;
+    final address = (r['delivery_address'] as String? ?? '').trim();
+    final history = ((r['order_status_history'] as List?) ?? [])
+        .whereType<Map>()
+        .where((h) => h['status'] is String && h['changed_at'] != null)
+        .map((h) => OrderStatusChange(h['status'] as String, Timestamp.parse(h['changed_at'])))
+        .toList()
+      ..sort((a, b) => a.at.compareTo(b.at));
     return Orders(
       id: r['id'] ?? '',
       userId: r['user_id'] ?? '',
       storeId: r['store_id'] ?? '',
+      storeName: (store?['name'] as String?) ?? '',
+      deliveryFee: _num(r['delivery_fee']) ?? 0.0,
+      deliveryAddress: address.isEmpty ? null : address,
+      statusHistory: history,
+      cancelledBy: r['cancelled_by'] as String?,
       products: ((r['order_items'] as List?) ?? [])
           .map((i) => Product(
                 id: (i['product_id'] ?? '').toString(),

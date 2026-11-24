@@ -446,7 +446,7 @@ class OrderDetailsPage extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  'Qty: 1', // Replace with actual quantity if available
+                  'Qty: ${product.quantity < 1 ? 1 : product.quantity}',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,

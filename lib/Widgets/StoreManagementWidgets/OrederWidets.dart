@@ -552,7 +552,7 @@ class _EnhancedOrderManagementPageState extends State<EnhancedOrderManagementPag
           'Order Items',
           Icons.shopping_bag_rounded,
           order.products.map((product) =>
-          '${product.name} - \$${product.price.toStringAsFixed(2)}'
+          '${product.name} × ${product.quantity < 1 ? 1 : product.quantity} - \$${product.price.toStringAsFixed(2)}'
           ).toList(),
         ),
 

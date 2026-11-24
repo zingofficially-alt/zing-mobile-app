@@ -29,3 +29,26 @@ project root.
 
 Never commit `.env`. `google-services.json` and `GoogleService-Info.plist` are
 Firebase client config files and stay in the repo.
+
+## Database migrations
+
+SQL lives in `supabase/migrations` and is applied in order:
+
+| File | Adds |
+|---|---|
+| `0001_schema.sql` | Tables, Row Level Security, storage buckets |
+| `0002_recommendations.sql` | `recommend_products()` |
+| `0003_order_delivery.sql` | Delivery fee/address, storage policies |
+| `0004_order_rules.sql` | `place_order()`, order status rules and history, stock reservation, order notifications, store opening hours |
+| `0005_store_expiry.sql` | `expire_store_access()` (daily, pg_cron) and re-activation on payment |
+
+Apply one with the Supabase CLI, or `node server/scripts/db-apply.js supabase/migrations/0004_order_rules.sql`.
+
+Orders are created only through `place_order()`: the database prices the items,
+checks and reserves stock and adds the delivery fee, so the app cannot set a
+price. A customer can cancel only a Pending order; the store moves it one step
+at a time or cancels it, and cancelling puts the stock back.
+
+Notifications reach the app through Supabase Realtime. Phone push notifications
+while the app is closed are not built yet (they need an FCM/APNs sender such as
+an Edge Function that reads a device-token table).

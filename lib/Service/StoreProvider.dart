@@ -10,6 +10,28 @@ class StoreProvider with ChangeNotifier {
 
   List<Store> get stores => _stores;
 
+  /// Stores customers may see (`stores.is_active`).
+  List<Store> get activeStores => _stores.where((s) => s.isActive).toList();
+
+  /// Saves the owner's weekly hours and the "closed for now" switch.
+  Future<void> updateStoreHours(
+    String storeId, {
+    OpeningHours? openingHours,
+    required bool temporarilyClosed,
+  }) async {
+    await _db.from('stores').update({
+      'opening_hours': openingHours?.toMap(),
+      'temporarily_closed': temporarilyClosed,
+    }).eq('id', storeId);
+    for (final s in _stores) {
+      if (s.id == storeId) {
+        s.openingHours = openingHours;
+        s.temporarilyClosed = temporarilyClosed;
+      }
+    }
+    notifyListeners();
+  }
+
   SupabaseClient get _db => Supabase.instance.client;
 
   StoreProvider() {

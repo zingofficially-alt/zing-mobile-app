@@ -1814,7 +1814,7 @@ class _EnhancedStoreManagementWidgetState extends State<EnhancedStoreManagementW
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '${order.products.length} item${order.products.length > 1 ? 's' : ''}',
+                '${order.itemCount} item${order.itemCount > 1 ? 's' : ''}',
                 style: theme.textTheme.bodyMedium,
               ),
               Text(
